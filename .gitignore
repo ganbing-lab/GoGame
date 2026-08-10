@@ -15,3 +15,14 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+# Launcher build artifacts
+/GoGame.upx
+/GoGame.exe-go-tmp-umask
+/GoGame_debug.exe
+/gogame_launcher.log
+/launcher/target/
+# Rust
+/launcher/target/
+
+# 上传脚本（本地使用，不上传）
+/upload_to_github.sh

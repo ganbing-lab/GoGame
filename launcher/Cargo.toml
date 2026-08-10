@@ -1,0 +1,18 @@
+[package]
+name = "gogame-launcher"
+version = "1.0.0"
+edition = "2021"
+description = "GoGame portable launcher"
+
+[[bin]]
+name = "GoGame"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
