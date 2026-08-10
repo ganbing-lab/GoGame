@@ -4,8 +4,16 @@
 """
 
 import sys
+import os
 import tkinter as tk
 from tkinter import messagebox
+
+# 当通过 pythonw.exe（无控制台）运行时，sys.stdout/stderr 为 None，
+# 此时 print() 会崩溃。重定向到 devnull 避免此问题。
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
 
 
 if __name__ == "__main__":

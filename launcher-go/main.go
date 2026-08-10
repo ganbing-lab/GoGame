@@ -240,16 +240,24 @@ func extractZip(zipPath, destDir string) error {
 }
 
 func moveDirContents(src, dest string) error {
-	// robocopy /MOVE /E — 移动所有文件包括子目录
+	// 先尝试 copy + delete（比 /MOVE 安全，/MOVE 在 dest 已存在目录时会丢文件）
+	// 跳过 python/ 目录（第一步已安装好），跳过 GoGame.exe（用户正在运行的自己）
+	skipDirs := map[string]bool{"python": true}
+
+	// robocopy /E（仅复制，不删除源）
 	cmd := exec.Command("cmd", "/C",
-		fmt.Sprintf(`robocopy "%s" "%s" /E /MOVE /NFL /NDL /NJH /NJS /nc /ns /np`, src, dest))
+		fmt.Sprintf(`robocopy "%s" "%s" /E /NFL /NDL /NJH /NJS /nc /ns /np /XD python`, src, dest))
 	cmd.Run()
 
-	// ★ 关键：只检查游戏文件 main.py（不能检查 python.exe，因为它可能已经存在）
+	// 检查 main.py 是否成功到达目标
 	if fileExists(filepath.Join(dest, "main.py")) {
+		// 成功，清理源目录
+		os.RemoveAll(src)
 		return nil
 	}
-	// robocopy 没成功，用 fallback 逐文件移动
+
+	// robocopy 没成功，回退到逐文件移动
+	_ = skipDirs // used above in robocopy args
 	return moveFilesFallback(src, dest)
 }
 
