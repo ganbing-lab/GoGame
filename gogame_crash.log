@@ -1,0 +1,26 @@
+[23:23:18] Python 3.14.5 (tags/v3.14.5:5607950, May 10 2026, 10:43:50) [MSC v.1944 64 bit (AMD64)] | exe=E:\GoGame\python\pythonw.exe | cwd=E:\GoGame | argv=['main.py']
+[23:23:18] 进入 main()
+[23:23:18] 导入 updater...
+[23:23:18] 检查更新中...
+[23:23:19] 更新检查结果: up_to_date: 4e5a157
+[23:23:19] FATAL: 'gbk' codec can't encode character '\u2705' in position 9: illegal multibyte sequence
+Traceback (most recent call last):
+  File "E:\GoGame\main.py", line 68, in <module>
+    print(f"[GoGame] ✅ 已是最新版本 ({result.removeprefix('up_to_date: ')})")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'gbk' codec can't encode character '\u2705' in position 9: illegal multibyte sequence
+
+[23:23:20] Python 3.14.5 (tags/v3.14.5:5607950, May 10 2026, 10:43:50) [MSC v.1944 64 bit (AMD64)] | exe=E:\GoGame\python\pythonw.exe | cwd=E:\GoGame | argv=['main.py']
+[23:23:20] 进入 main()
+[23:23:20] 导入 updater...
+[23:23:20] 检查更新中...
+[23:23:22] 更新检查结果: up_to_date: 4e5a157
+[23:23:22] FATAL: 'gbk' codec can't encode character '\u2705' in position 9: illegal multibyte sequence
+Traceback (most recent call last):
+  File "E:\GoGame\main.py", line 68, in <module>
+    print(f"[GoGame] ✅ 已是最新版本 ({result.removeprefix('up_to_date: ')})")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'gbk' codec can't encode character '\u2705' in position 9: illegal multibyte sequence
+
+[23:23:25] Python 进程正常退出
+[23:23:25] Python 进程正常退出

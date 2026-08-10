@@ -65,11 +65,7 @@ fn main() {
     // ── 第三步：启动游戏 ──
     log("🚀 正在启动游戏...");
 
-    // 尝试用 pythonw.exe（无控制台）启动，否回退 python.exe
-    let pythonw = cwd.join("python").join("pythonw.exe");
-    let py = if pythonw.exists() { pythonw } else { python_exe };
-
-    match Command::new(&py)
+    match Command::new(&python_exe)
         .arg("main.py")
         .current_dir(&cwd)
         .stdin(Stdio::null())
@@ -79,20 +75,11 @@ fn main() {
     {
         Ok(mut child) => {
             log("游戏进程已启动，启动器退出。");
-            // 不等待子进程，直接退出
             drop(child);
         }
         Err(e) => {
-            // 回退：用 python.exe + 显示窗口
-            log(&format!("无窗口启动失败 ({}), 尝试带控制台启动...", e));
-            let status = Command::new(&cwd.join("python").join("python.exe"))
-                .arg("main.py")
-                .current_dir(&cwd)
-                .status()
-                .unwrap_or_else(|e2| fail(&format!("无法启动 Python: {}", e2)));
-            if !status.success() {
-                pause_and_exit(&format!("游戏异常退出，代码: {:?}", status.code()));
-            }
+            log(&format!("无法启动 Python: {}", e));
+            pause_and_exit(&format!("无法启动 Python: {}", e));
         }
     }
 }

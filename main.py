@@ -8,8 +8,7 @@ import os
 import tkinter as tk
 from tkinter import messagebox
 
-# 当通过 pythonw.exe（无控制台）运行时，sys.stdout/stderr 为 None，
-# 此时 print() 会崩溃。重定向到 devnull 避免此问题。
+# 当通过 pythonw.exe（无控制台）运行时，sys.stdout/stderr 为 None
 if sys.stdout is None:
     sys.stdout = open(os.devnull, 'w')
 if sys.stderr is None:
@@ -17,32 +16,54 @@ if sys.stderr is None:
 
 
 if __name__ == "__main__":
-    # ── 第一步：检查更新（在任何游戏模块导入之前） ──
-    # updater 只依赖 stdlib，可以安全地提前导入
-    from gogame.updater import check_and_update
+    try:
+        from gogame.updater import check_and_update
 
-    print("[GoGame] 检查更新中...")
-    result = check_and_update()
+        print("[GoGame] Checking for updates...")
+        result = check_and_update()
 
-    if result.startswith("updated:"):
-        info = result.removeprefix("updated: ")
-        print(f"[GoGame] ✅ 已更新: {info}")
-        # 需要弹出对话框提示重启，因为 tkinter 不能热加载已更新的模块
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showinfo(
-            "GoGame 更新",
-            f"已从 GitHub 拉取最新版本！\n\n更新内容: {info}\n\n请重新启动应用以使用新版本。"
-        )
-        root.destroy()
-        sys.exit(0)
-    elif result.startswith("up_to_date:"):
-        print(f"[GoGame] ✅ 已是最新版本 ({result.removeprefix('up_to_date: ')})")
-    elif result.startswith("no_git"):
-        print("[GoGame] ⚠ 未检测到 Git 仓库，跳过更新检查。")
-    else:
-        print(f"[GoGame] ⚠ 更新检查失败（将正常启动）: {result.removeprefix('update_failed: ')}")
+        if result.startswith("updated:"):
+            info = result.removeprefix("updated: ")
+            print(f"[GoGame] Updated: {info}")
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showinfo(
+                "GoGame Update",
+                f"Updated from GitHub!\n\nChanges: {info}\n\nPlease restart to use the new version."
+            )
+            root.destroy()
+            sys.exit(0)
+        elif result.startswith("up_to_date:"):
+            print(f"[GoGame] Up to date ({result.removeprefix('up_to_date: ')})")
+        elif result.startswith("no_git"):
+            print("[GoGame] No git repo found, skipping update check.")
+        else:
+            print(f"[GoGame] Update check skipped: {result.removeprefix('update_failed: ')}")
 
-    # ── 第二步：正常启动游戏 ──
-    from gogame.app import GoApp
-    GoApp().run()
+        from gogame.app import GoApp
+        GoApp().run()
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        import traceback
+        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gogame_crash.log")
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(f"GoGame Crash Report\n{'=' * 50}\n")
+            f.write(f"Python: {sys.version}\n")
+            f.write(f"Executable: {sys.executable}\n")
+            f.write(f"cwd: {os.getcwd()}\n\n")
+            f.write(traceback.format_exc())
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "GoGame Crash",
+                f"Game failed to start.\n\nDetails written to:\n{log_path}\n\n"
+                f"{type(e).__name__}: {e}"
+            )
+            root.destroy()
+        except Exception:
+            pass
+        sys.exit(1)

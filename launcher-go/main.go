@@ -71,27 +71,15 @@ func main() {
 	// ── 第三步：启动游戏 ──
 	log("启动游戏: %s main.py", pythonExe)
 
-	// 优先 pythonw.exe（无控制台）
-	pywExe := filepath.Join(exeDir, "python", "pythonw.exe")
-	pyExe := pythonExe
-	if fileExists(pywExe) {
-		pyExe = pywExe
-	}
-
-	cmd := exec.Command(pyExe, "main.py")
+	cmd := exec.Command(pythonExe, "main.py")
 	cmd.Dir = exeDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	if err := cmd.Start(); err != nil {
-		// 回退到 python.exe
-		cmd2 := exec.Command(pythonExe, "main.py")
-		cmd2.Dir = exeDir
-		if err2 := cmd2.Start(); err2 != nil {
-			log("无法启动 Python: %v / %v", err, err2)
-			if logFile != nil { logFile.Close() }
-			msgBox("GoGame 启动器", "无法启动游戏。\n\n请确认 python\\python.exe 存在且可运行。")
-			return
-		}
+		log("无法启动 Python: %v", err)
+		if logFile != nil { logFile.Close() }
+		msgBox("GoGame 启动器", "无法启动游戏。\n\n请确认 python\\python.exe 存在且可运行。")
+		return
 	}
 
 	log("游戏已启动 (PID: %d), 启动器退出", cmd.Process.Pid)

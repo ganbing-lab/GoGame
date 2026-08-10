@@ -9,8 +9,7 @@ import os
 import tkinter as tk
 from tkinter import messagebox
 
-# 当通过 pythonw.exe（无控制台）运行时，sys.stdout/stderr 为 None，
-# 此时 print() 会崩溃。重定向到 devnull 避免此问题。
+# 当通过 pythonw.exe（无控制台）运行时，sys.stdout/stderr 为 None
 if sys.stdout is None:
     sys.stdout = open(os.devnull, 'w')
 if sys.stderr is None:
@@ -20,26 +19,26 @@ if sys.stderr is None:
 def main():
     from .updater import check_and_update
 
-    print("[GoGame] 检查更新中...")
+    print("[GoGame] Checking for updates...")
     result = check_and_update()
 
     if result.startswith("updated:"):
         info = result.removeprefix("updated: ")
-        print(f"[GoGame] ✅ 已更新: {info}")
+        print(f"[GoGame] Updated: {info}")
         root = tk.Tk()
         root.withdraw()
         messagebox.showinfo(
-            "GoGame 更新",
-            f"已从 GitHub 拉取最新版本！\n\n更新内容: {info}\n\n请重新启动应用以使用新版本。"
+            "GoGame Update",
+            f"Updated from GitHub!\n\nChanges: {info}\n\nPlease restart to use the new version."
         )
         root.destroy()
         sys.exit(0)
     elif result.startswith("up_to_date:"):
-        print(f"[GoGame] ✅ 已是最新版本 ({result.removeprefix('up_to_date: ')})")
+        print(f"[GoGame] Up to date ({result.removeprefix('up_to_date: ')})")
     elif result.startswith("no_git"):
-        print("[GoGame] ⚠ 未检测到 Git 仓库，跳过更新检查。")
+        print("[GoGame] No git repo found, skipping update check.")
     else:
-        print(f"[GoGame] ⚠ 更新检查失败（将正常启动）: {result.removeprefix('update_failed: ')}")
+        print(f"[GoGame] Update check skipped: {result.removeprefix('update_failed: ')}")
 
     from .app import GoApp
     GoApp().run()

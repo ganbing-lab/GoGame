@@ -93,15 +93,14 @@ def check_and_update_verbose(print_func=None):
     result = check_and_update()
 
     if result.startswith("updated:"):
-        print_func(f"[GoGame] ✅ 已更新: {result.removeprefix('updated: ')}，请重启应用。")
-        # 更新成功后提示重启 — 因为 tkinter 不能热加载已导入的模块
-        return True  # 需要重启
+        print_func(f"[GoGame] Updated: {result.removeprefix('updated: ')}, please restart.")
+        return True
     elif result.startswith("up_to_date:"):
-        print_func(f"[GoGame] ✅ 已是最新版本 ({result.removeprefix('up_to_date: ')})")
+        print_func(f"[GoGame] Up to date ({result.removeprefix('up_to_date: ')})")
         return False
     elif result.startswith("no_git"):
-        print_func("[GoGame] ⚠ 未检测到 Git，跳过更新检查。")
+        print_func("[GoGame] No git repo found, skipping update check.")
         return False
     else:
-        print_func(f"[GoGame] ⚠ 更新检查失败: {result.removeprefix('update_failed: ')}")
+        print_func(f"[GoGame] Update check failed: {result.removeprefix('update_failed: ')}")
         return False
