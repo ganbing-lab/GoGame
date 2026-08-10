@@ -1,0 +1,8 @@
+[project]
+name = "gogame"
+version = "1.0.0"
+description = "简易围棋小游戏"
+requires-python = ">=3.10"
+
+[dependency-groups]
+dev = []
