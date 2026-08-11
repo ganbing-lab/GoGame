@@ -15,6 +15,7 @@ from .config import (
 from .core import GoGame
 from .board import BoardCanvas
 from .board_config import BoardConfig, STANDARD_CONFIG
+from .network import GoNetwork
 from . import sgf
 
 
@@ -30,6 +31,9 @@ class GoApp:
         self.mode = "playing"      # "playing" | "scoring"
         self.view_pos = 0          # 当前查看的步数 (0 = 初始, len(moves) = 最新)
         self.board_config_path = None  # 当前棋盘配置文件路径（None=默认）
+        self.net = None            # 联机连接
+        self._my_color = None      # 联机时我的颜色 (COLOR_BLACK/COLOR_WHITE)
+        self._network_poll_id = None  # after() id
         self._build_ui()
 
     # ──────────────────────────────────────────────
@@ -148,6 +152,20 @@ class GoApp:
         self.new_btn = tk.Button(panel, text="新局 New Game", command=self._new_game, **btn)
         self.new_btn.pack(pady=(6, 8))
 
+        # ── 联机按钮 ──
+        tk.Label(panel, text="── 联机 ──", **sep).pack(pady=(6, 2))
+        self.host_btn = tk.Button(panel, text="创建对局 (主机)", command=self._host_game, **btn)
+        self.host_btn.pack(pady=2)
+        self.join_btn = tk.Button(panel, text="加入对局 (客机)", command=self._join_game, **btn)
+        self.join_btn.pack(pady=2)
+        self.disconnect_btn = tk.Button(panel, text="断开连接", command=self._disconnect,
+                                       state=tk.DISABLED, **btn)
+        self.disconnect_btn.pack(pady=2)
+        self.net_status_label = tk.Label(
+            panel, text="", font=("Microsoft YaHei", 8),
+            bg=PANEL_BG, fg="#666666")
+        self.net_status_label.pack(pady=(0, 0))
+
         self.hint_label = tk.Label(
             panel, text="", font=("Microsoft YaHei", 9),
             bg=PANEL_BG, fg="#888888", wraplength=PANEL_W - 20, justify=tk.LEFT)
@@ -255,6 +273,11 @@ class GoApp:
     #  棋盘点击分发
     # ──────────────────────────────────────────────
     def _on_board_click(self, r, c):
+        # 联机模式下，只有轮到自己才能落子
+        if self._my_color is not None and self.game.current != self._my_color:
+            self.hint_label.config(text="等待对手落子...")
+            self.root.after(1200, lambda: self.hint_label.config(text=""))
+            return
         if self.mode == "scoring":
             self._cycle_mark(r, c)
             self.canvas.refresh()
@@ -278,12 +301,20 @@ class GoApp:
         self.canvas.refresh()
         self._update_panel()
         self._update_nav()
+        # 联机：发送落子给对方
+        if self.net and self.net.is_connected():
+            self.net.send({"type": "move", "r": r, "c": c})
 
     # ──────────────────────────────────────────────
     #  对局按钮
     # ──────────────────────────────────────────────
     def _pass(self):
         if self.game.game_over or self.mode == "scoring":
+            return
+        # 联机模式，只有轮到自己才能虚手
+        if self._my_color is not None and self.game.current != self._my_color:
+            self.hint_label.config(text="等待对手操作...")
+            self.root.after(1200, lambda: self.hint_label.config(text=""))
             return
         ended = self.game.pass_move()
         if ended:
@@ -293,6 +324,8 @@ class GoApp:
             self._update_panel()
         self.view_pos = len(self.game.moves)
         self._update_nav()
+        if self.net and self.net.is_connected():
+            self.net.send({"type": "pass"})
 
     def _end_game(self):
         if self.game.game_over or self.mode == "scoring":
@@ -304,12 +337,19 @@ class GoApp:
     def _resign(self):
         if self.game.game_over or self.mode == "scoring":
             return
+        # 联机模式，只有轮到自己才能认输
+        if self._my_color is not None and self.game.current != self._my_color:
+            self.hint_label.config(text="等待对手操作...")
+            self.root.after(1200, lambda: self.hint_label.config(text=""))
+            return
         name = "黑方" if self.game.current == COLOR_BLACK else "白方"
         if messagebox.askyesno("认输", f"{name}确定认输吗？"):
             self.game.resign()
             self.canvas.refresh()
             self._update_panel()
             self._disable_play_buttons()
+            if self.net and self.net.is_connected():
+                self.net.send({"type": "resign"})
 
     # ──────────────────────────────────────────────
     #  标记计分模式
@@ -419,6 +459,195 @@ class GoApp:
         self._update_panel()
         self._update_nav()
         self._after_scroll_update()
+
+    # ──────────────────────────────────────────────
+    #  联机对战
+    # ──────────────────────────────────────────────
+    def _host_game(self):
+        """创建主机，监听端口等客机连接。"""
+        if self.net and self.net.is_connected():
+            messagebox.showinfo("联机", "已处于联机状态，请先断开。")
+            return
+
+        from tkinter import simpledialog
+        port_str = simpledialog.askstring(
+            "创建对局", "请输入监听端口:",
+            parent=self.root)
+        if not port_str:
+            return
+        try:
+            port = int(port_str.strip())
+        except ValueError:
+            messagebox.showerror("错误", "端口必须是数字。")
+            return
+
+        if self.game.moves:
+            if not messagebox.askyesno("创建对局", "当前对局将被清除，确定继续？"):
+                return
+
+        self.net = GoNetwork(
+            on_message=self._on_network_message,
+            on_disconnect=self._on_network_disconnect,
+            on_connected=self._on_network_connected)
+
+        self._my_color = COLOR_BLACK  # 主机执黑
+        self._reset_with_current_board()
+        self._disable_connect_buttons()
+
+        self.net.start_server(port, name="主机")
+        self.net_status_label.config(text=f"等待连接... 端口 {port}")
+        self._start_poll()
+
+    def _join_game(self):
+        """加入对局，连接主机。"""
+        if self.net and self.net.is_connected():
+            messagebox.showinfo("联机", "已处于联机状态，请先断开。")
+            return
+
+        from tkinter import simpledialog
+        addr = simpledialog.askstring(
+            "加入对局", "请输入主机地址 (如 192.168.1.1:9000 或 [::1]:9000):",
+            parent=self.root)
+        if not addr:
+            return
+
+        # 解析 host:port，处理 IPv6 的 [addr]:port
+        host = addr.strip()
+        port = 9000
+        if host.startswith("[") and "]" in host:
+            bracket_end = host.index("]")
+            ip = host[1:bracket_end]
+            rest = host[bracket_end + 1:]
+            host = ip
+            if rest.startswith(":"):
+                port = int(rest[1:])
+        elif ":" in host:
+            last_colon = host.rfind(":")
+            try:
+                port = int(host[last_colon + 1:])
+                host = host[:last_colon]
+            except ValueError:
+                pass  # 可能是纯 IPv6 地址没有端口，用默认
+
+        if self.game.moves:
+            if not messagebox.askyesno("加入对局", "当前对局将被清除，确定继续？"):
+                return
+
+        self.net = GoNetwork(
+            on_message=self._on_network_message,
+            on_disconnect=self._on_network_disconnect,
+            on_connected=self._on_network_connected)
+
+        self._my_color = COLOR_WHITE  # 客机执白
+        self._reset_with_current_board()
+        self._disable_connect_buttons()
+
+        self.net.connect_to(host, port, name="客机")
+        self.net_status_label.config(text=f"正在连接 {addr}...")
+        self._start_poll()
+
+    def _disconnect(self):
+        """主动断开联机。"""
+        if self.net:
+            self.net.disconnect()
+            self.net = None
+        self._my_color = None
+        self._stop_poll()
+        self.net_status_label.config(text="已断开")
+        self.host_btn.config(state=tk.NORMAL)
+        self.join_btn.config(state=tk.NORMAL)
+        self.disconnect_btn.config(state=tk.DISABLED)
+        self.hint_label.config(text="")
+
+    def _disable_connect_buttons(self):
+        self.host_btn.config(state=tk.DISABLED)
+        self.join_btn.config(state=tk.DISABLED)
+        self.disconnect_btn.config(state=tk.NORMAL)
+
+    def _start_poll(self):
+        """启动网络轮询（每 100ms 检查收信）。"""
+        if self._network_poll_id is not None:
+            return
+        def _poll():
+            if self.net:
+                self.net.poll()
+            if self.net:
+                self._network_poll_id = self.root.after(100, _poll)
+            else:
+                self._network_poll_id = None
+        self._network_poll_id = self.root.after(100, _poll)
+
+    def _stop_poll(self):
+        if self._network_poll_id is not None:
+            self.root.after_cancel(self._network_poll_id)
+            self._network_poll_id = None
+
+    def _on_network_connected(self, peer):
+        """连接建立后的回调。"""
+        def _connected():
+            color_name = "⚫ 黑方" if self._my_color == COLOR_BLACK else "⚪ 白方"
+            self.net_status_label.config(text=f"已连接 ({color_name})")
+            self._update_panel()
+        self.root.after(0, _connected)
+
+    def _on_network_disconnect(self, peer):
+        """对方断开连接的回调。"""
+        def _dc():
+            name = "对手断开连接"
+            if peer is None:
+                name = "连接失败"
+            self.net_status_label.config(text=name)
+            self.host_btn.config(state=tk.NORMAL)
+            self.join_btn.config(state=tk.NORMAL)
+            self.disconnect_btn.config(state=tk.DISABLED)
+            if self.net:
+                self.net.disconnect()
+                self.net = None
+            self._my_color = None
+            self._stop_poll()
+            self._update_panel()
+        self.root.after(0, _dc)
+
+    def _on_network_message(self, peer, msg):
+        """收到对手消息的回调。"""
+        msg_type = msg.get("type", "")
+
+        if msg_type == "hello":
+            # 客机收到主机的 hello，同步棋盘配置
+            if self._my_color == COLOR_WHITE and "disabled" in msg:
+                disabled_list = msg.get("disabled", [])
+                _cfg.DISABLED_CELLS = set(tuple(d) for d in disabled_list)
+                self._reset_with_current_board()
+                self.canvas._draw_board()
+                self.canvas.refresh()
+            return
+
+        if self.mode != "playing" or self.game.game_over:
+            return
+
+        if msg_type == "move":
+            r, c = msg["r"], msg["c"]
+            self.game.play(r, c)
+            self.view_pos = len(self.game.moves)
+            self.canvas.refresh()
+            self._update_panel()
+            self._update_nav()
+
+        elif msg_type == "pass":
+            ended = self.game.pass_move()
+            if ended:
+                self._enter_scoring()
+            else:
+                self.canvas.refresh()
+                self._update_panel()
+            self.view_pos = len(self.game.moves)
+            self._update_nav()
+
+        elif msg_type == "resign":
+            self.game.resign()
+            self.canvas.refresh()
+            self._update_panel()
+            self._disable_play_buttons()
 
     # ──────────────────────────────────────────────
     #  自定义棋盘加载
