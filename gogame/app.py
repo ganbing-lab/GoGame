@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 import os
 
+import gogame.config as _cfg
 from .config import (
     COLOR_BLACK, COLOR_WHITE, COLOR_EMPTY, MARK_NEUTRAL, KOMI,
     BOARD_SIZE, PANEL_W, WIN_W, WIN_H,
@@ -13,6 +14,7 @@ from .config import (
 )
 from .core import GoGame
 from .board import BoardCanvas
+from .board_config import BoardConfig, STANDARD_CONFIG
 from . import sgf
 
 
@@ -24,9 +26,10 @@ class GoApp:
     """围棋主应用"""
 
     def __init__(self):
-        self.game = GoGame()
+        self.game = GoGame(disabled=_cfg.DISABLED_CELLS)
         self.mode = "playing"      # "playing" | "scoring"
         self.view_pos = 0          # 当前查看的步数 (0 = 初始, len(moves) = 最新)
+        self.board_config_path = None  # 当前棋盘配置文件路径（None=默认）
         self._build_ui()
 
     # ──────────────────────────────────────────────
@@ -94,6 +97,7 @@ class GoApp:
         btn = {"font": ("Microsoft YaHei", 11), "bg": BTN_BG,
                "activebackground": "#D5C9B0", "relief": tk.GROOVE,
                "bd": 2, "padx": 12, "pady": 4, "cursor": "hand2"}
+        sep = {"font": ("Microsoft YaHei", 9), "bg": PANEL_BG, "fg": "#AAAAAA"}
 
         # 对局按钮
         self.pass_btn = tk.Button(panel, text="虚手 Pass", command=self._pass, **btn)
@@ -103,8 +107,16 @@ class GoApp:
         self.resign_btn = tk.Button(panel, text="认输 Resign", command=self._resign, **btn)
         self.resign_btn.pack(pady=3)
 
+        # 自定义棋盘按钮
+        tk.Label(panel, text="── 棋盘 ──", **sep).pack(pady=(6, 2))
+        self.load_board_btn = tk.Button(panel, text="加载棋盘文件", command=self._load_board, **btn)
+        self.load_board_btn.pack(pady=2)
+        self.board_name_label = tk.Label(
+            panel, text="当前: 19路标准棋盘", font=("Microsoft YaHei", 8),
+            bg=PANEL_BG, fg="#666666")
+        self.board_name_label.pack(pady=(0, 0))
+
         # SGF 导入/导出按钮
-        sep = {"font": ("Microsoft YaHei", 9), "bg": PANEL_BG, "fg": "#AAAAAA"}
         tk.Label(panel, text="── 棋谱 ──", **sep).pack(pady=(6, 2))
         self.export_sgf_btn = tk.Button(panel, text="导出 SGF", command=self._export_sgf, **btn)
         self.export_sgf_btn.pack(pady=2)
@@ -303,10 +315,14 @@ class GoApp:
     #  标记计分模式
     # ──────────────────────────────────────────────
     def _init_marks(self):
-        """初始标记：棋盘上每格赋初值。空点 = 中立（中性），黑子 = 黑，白子 = 白。"""
+        """初始标记：棋盘上每格赋初值。
+        空点 = 中立（中性），黑子 = 黑，白子 = 白。
+        跳过禁用格。"""
         self.canvas.marks = {}
         for r in range(BOARD_SIZE):
             for c in range(BOARD_SIZE):
+                if (r, c) in _cfg.DISABLED_CELLS:
+                    continue
                 cell = self.game.board[r][c]
                 if cell == COLOR_EMPTY:
                     self.canvas.marks[(r, c)] = MARK_NEUTRAL
@@ -398,6 +414,86 @@ class GoApp:
         self.canvas.marks = {}
         self.canvas.hover_pos = None
         self.canvas.refresh()
+        self.canvas.config(cursor="hand2")
+        self.hint_label.config(text="")
+        self._update_panel()
+        self._update_nav()
+        self._after_scroll_update()
+
+    # ──────────────────────────────────────────────
+    #  自定义棋盘加载
+    # ──────────────────────────────────────────────
+    def _load_board(self):
+        """加载自定义棋盘文件。非标准棋盘禁用 SGF 导入。"""
+        if self.game.moves:
+            if not messagebox.askyesno(
+                "加载棋盘", "当前对局有棋谱记录，加载新棋盘将清除对局。\n确定继续吗？"
+            ):
+                return
+
+        board_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "boards")
+        if not os.path.isdir(board_dir):
+            board_dir = os.path.dirname(os.path.dirname(__file__))
+
+        path = filedialog.askopenfilename(
+            title="加载棋盘配置文件",
+            initialdir=board_dir,
+            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            cfg = BoardConfig.load(path)
+            if cfg.size != BOARD_SIZE:
+                messagebox.showerror(
+                    "棋盘尺寸不匹配",
+                    f"棋盘文件定义尺寸为 {cfg.size}，当前程序只支持 {BOARD_SIZE} 路棋盘。\n"
+                    f"请使用 {BOARD_SIZE} 路的棋盘文件。")
+                return
+
+            _cfg.DISABLED_CELLS = cfg.disabled
+            _cfg.BOARD_CONFIG_NAME = cfg.name
+            _cfg.BOARD_IS_CUSTOM = not cfg.is_standard
+            self.board_config_path = path
+
+            self.board_name_label.config(text=f"当前: {cfg.name}")
+
+            if cfg.is_standard:
+                self.import_sgf_btn.config(state=tk.NORMAL, text="导入 SGF")
+            else:
+                self.import_sgf_btn.config(state=tk.DISABLED,
+                    text="导入 SGF (自定义棋盘不可用)")
+
+            self._reset_with_current_board()
+            self.canvas._draw_board()
+            self.canvas.refresh()
+
+            msg = f"已加载棋盘: {cfg.name}"
+            if cfg.disabled:
+                msg += f"\n禁用格数: {len(cfg.disabled)}"
+            messagebox.showinfo("加载成功", msg)
+
+        except Exception as e:
+            messagebox.showerror("加载失败", f"无法加载棋盘文件:\n{e}")
+
+    def _reset_with_current_board(self):
+        """使用全局 config 中的当前 DISABLED_CELLS 重建游戏。"""
+        # 清理计分模式 UI
+        if self.mode == "scoring":
+            self.score_frame.pack_forget()
+            for b in (self.confirm_btn, self.cancel_score_btn):
+                b.pack_forget()
+            for b in (self.pass_btn, self.end_btn, self.resign_btn):
+                b.pack(pady=4)
+                b.config(state=tk.NORMAL)
+
+        self.game = GoGame(disabled=_cfg.DISABLED_CELLS)
+        self.mode = "playing"
+        self.view_pos = 0
+        self.canvas.marks = {}
+        self.canvas.hover_pos = None
+        self.canvas.game = self.game
         self.canvas.config(cursor="hand2")
         self.hint_label.config(text="")
         self._update_panel()

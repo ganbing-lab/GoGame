@@ -9,8 +9,9 @@ from .config import BOARD_SIZE, COLOR_EMPTY, COLOR_BLACK, COLOR_WHITE, MARK_NEUT
 class GoGame:
     """围棋核心引擎"""
 
-    def __init__(self):
+    def __init__(self, disabled=None):
         self.board = [[COLOR_EMPTY] * BOARD_SIZE for _ in range(BOARD_SIZE)]
+        self.disabled = disabled if disabled else set()
         self.current = COLOR_BLACK
         self.captured = {COLOR_BLACK: 0, COLOR_WHITE: 0}
         self.prev_board = None               # 劫争用
@@ -22,9 +23,10 @@ class GoGame:
     # ──────────────────────────────────────────────
     #  基础图论工具
     # ──────────────────────────────────────────────
-    @staticmethod
-    def _in_bounds(r, c):
-        return 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE
+    def _in_bounds(self, r, c):
+        if not (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE):
+            return False
+        return (r, c) not in self.disabled
 
     def _neighbors(self, r, c):
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -98,6 +100,8 @@ class GoGame:
     def is_valid(self, r, c):
         """检查 (r,c) 是否合法落子点"""
         if self.game_over:
+            return False
+        if (r, c) in self.disabled:
             return False
         if not self._in_bounds(r, c) or self.board[r][c] != COLOR_EMPTY:
             return False
@@ -175,7 +179,9 @@ class GoGame:
         self.winner = COLOR_WHITE if self.current == COLOR_BLACK else COLOR_BLACK
 
     def reset(self):
+        saved_disabled = self.disabled
         self.__init__()
+        self.disabled = saved_disabled
 
     def set_position(self, n):
         """回退到第 n 手（0 <= n <= len(moves)）。
@@ -184,6 +190,7 @@ class GoGame:
         每次调用都是重新回放（不是增量）。
         """
         n = max(0, min(n, len(self.moves)))
+        saved_disabled = self.disabled
         saved = self.moves[:]
         self.board = [[COLOR_EMPTY] * BOARD_SIZE for _ in range(BOARD_SIZE)]
         self.captured = {COLOR_BLACK: 0, COLOR_WHITE: 0}

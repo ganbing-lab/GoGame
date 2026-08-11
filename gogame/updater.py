@@ -89,7 +89,7 @@ def check_and_update_verbose(print_func=None):
     if print_func is None:
         print_func = print
 
-    print_func("[GoGame] 检查更新中...")
+    print_func("[GoGame] Checking for updates...")
     result = check_and_update()
 
     if result.startswith("updated:"):

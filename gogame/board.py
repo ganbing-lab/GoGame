@@ -4,6 +4,7 @@
 
 import tkinter as tk
 
+import gogame.config as _cfg
 from .config import (
     BOARD_SIZE, CELL_SIZE, MARGIN, STONE_R, BOARD_PX,
     COLOR_BLACK, COLOR_WHITE, COLOR_EMPTY, MARK_NEUTRAL,
@@ -33,6 +34,8 @@ class BoardCanvas(tk.Canvas):
         c = round((px - MARGIN) / CELL_SIZE)
         r = round((py - MARGIN) / CELL_SIZE)
         if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
+            if (r, c) in _cfg.DISABLED_CELLS:
+                return None
             return r, c
         return None
 
@@ -45,17 +48,49 @@ class BoardCanvas(tk.Canvas):
     # ──────────────────────────────────────────────
     def _draw_board(self):
         self.delete("grid")
+        self.delete("disabled")
 
+        # 筛选可见星位（排除禁用格）
+        visible_stars = [(r, c) for r, c in STAR_POINTS
+                         if (r, c) not in _cfg.DISABLED_CELLS]
+
+        # 画线时跳过禁用格的交叉点，用裁剪线模拟
+        # 先画禁用格的深色填充背景
+        side = CELL_SIZE / 2
+        for r, c in _cfg.DISABLED_CELLS:
+            x, y = self._to_px(r, c)
+            # 填充一个稍微大一点的菱形/方块遮住断开的线头
+            self.create_rectangle(
+                x - side - 1, y - side - 1, x + side + 1, y + side + 1,
+                fill=BG_COLOR, outline="", tags="disabled")
+            # 禁用格本身的深色标记
+            self.create_rectangle(
+                x - side + 2, y - side + 2, x + side - 2, y + side - 2,
+                fill="#8B7355", outline="#6B5335", width=1, tags="disabled")
+
+        # 逐行画线，遇禁用格时断开
         for i in range(BOARD_SIZE):
             y = MARGIN + i * CELL_SIZE
-            self.create_line(MARGIN, y, MARGIN + CELL_SIZE * (BOARD_SIZE - 1), y,
-                             fill=LINE_COLOR, width=1, tags="grid")
+            segments_x = self._line_segments(
+                MARGIN, y,
+                MARGIN + CELL_SIZE * (BOARD_SIZE - 1), y,
+                is_row=True, row_idx=i)
+            for x1, y1, x2, y2 in segments_x:
+                self.create_line(x1, y1, x2, y2,
+                                 fill=LINE_COLOR, width=1, tags="grid")
+
         for i in range(BOARD_SIZE):
             x = MARGIN + i * CELL_SIZE
-            self.create_line(x, MARGIN, x, MARGIN + CELL_SIZE * (BOARD_SIZE - 1),
-                             fill=LINE_COLOR, width=1, tags="grid")
+            segments_y = self._line_segments(
+                x, MARGIN, x,
+                MARGIN + CELL_SIZE * (BOARD_SIZE - 1),
+                is_row=False, col_idx=i)
+            for x1, y1, x2, y2 in segments_y:
+                self.create_line(x1, y1, x2, y2,
+                                 fill=LINE_COLOR, width=1, tags="grid")
 
-        for r, c in STAR_POINTS:
+        # 星位
+        for r, c in visible_stars:
             x, y = self._to_px(r, c)
             self.create_oval(x - 4, y - 4, x + 4, y + 4,
                              fill=LINE_COLOR, outline="", tags="grid")
@@ -75,6 +110,51 @@ class BoardCanvas(tk.Canvas):
                              font=("Arial", 9), tags="grid")
             self.create_text(BOARD_PX - 14, y, text=str(BOARD_SIZE - i), fill=LINE_COLOR,
                              font=("Arial", 9), tags="grid")
+
+    @staticmethod
+    def _line_segments(x1, y1, x2, y2, is_row, row_idx=0, col_idx=0):
+        """将一条完整的棋盘线裁剪掉禁用格部分，返回线段列表。"""
+        if is_row:
+            # 横线：row_idx 固定，收集该行所有禁用列
+            target_row = row_idx
+            disabled_positions = sorted(
+                col for (rr, col) in _cfg.DISABLED_CELLS if rr == target_row)
+        else:
+            # 竖线：col_idx 固定，收集该列所有禁用行
+            target_col = col_idx
+            disabled_positions = sorted(
+                row for (row, cc) in _cfg.DISABLED_CELLS if cc == target_col)
+
+        if not disabled_positions:
+            return [(x1, y1, x2, y2)]
+
+        segments = []
+        if is_row:
+            start_px = x1
+            end_px = x2
+            for col in disabled_positions:
+                cx = MARGIN + col * CELL_SIZE
+                gap_start = cx - CELL_SIZE / 2
+                gap_end = cx + CELL_SIZE / 2
+                if start_px < gap_start:
+                    segments.append((start_px, y1, gap_start, y2))
+                start_px = gap_end
+            if start_px < end_px:
+                segments.append((start_px, y1, end_px, y2))
+        else:
+            start_py = y1
+            end_py = y2
+            for row in disabled_positions:
+                ry = MARGIN + row * CELL_SIZE
+                gap_start = ry - CELL_SIZE / 2
+                gap_end = ry + CELL_SIZE / 2
+                if start_py < gap_start:
+                    segments.append((x1, start_py, x2, gap_start))
+                start_py = gap_end
+            if start_py < end_py:
+                segments.append((x1, start_py, x2, end_py))
+
+        return segments
 
     # ──────────────────────────────────────────────
     #  绘制棋子 / 标记色块 / 悬停

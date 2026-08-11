@@ -12,6 +12,12 @@ BOARD_PX = MARGIN * 2 + CELL_SIZE * (BOARD_SIZE - 1)
 WIN_W = BOARD_PX + PANEL_W + 60
 WIN_H = BOARD_PX + 160
 
+# 自定义棋盘配置：从 boards/ 目录加载
+# 默认标准 19 路棋盘，无禁用格
+DISABLED_CELLS = set()       # set of (row, col)
+BOARD_CONFIG_NAME = "19路标准棋盘"
+BOARD_IS_CUSTOM = False      # 是否加载了非标准棋盘
+
 # 棋子颜色常量（无 UI 依赖，纯逻辑层可用）
 COLOR_EMPTY = 0
 COLOR_BLACK = 1
