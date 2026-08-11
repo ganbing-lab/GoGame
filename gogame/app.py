@@ -464,7 +464,7 @@ class GoApp:
     #  联机对战
     # ──────────────────────────────────────────────
     def _host_game(self):
-        """创建主机，监听端口等客机连接。"""
+        """创建主机，监听端口等客机连接。可选黑白方。"""
         if self.net and self.net.is_connected():
             messagebox.showinfo("联机", "已处于联机状态，请先断开。")
             return
@@ -481,6 +481,17 @@ class GoApp:
             messagebox.showerror("错误", "端口必须是数字。")
             return
 
+        # 选择颜色
+        color_choice = messagebox.askquestion(
+            "选择颜色", "是否执黑先手？\n\n是 = 执黑先手\n否 = 执白后手（客机执黑）",
+            parent=self.root)
+        if color_choice is None:
+            return
+        if color_choice == "yes":
+            self._my_color = COLOR_BLACK
+        else:
+            self._my_color = COLOR_WHITE
+
         if self.game.moves:
             if not messagebox.askyesno("创建对局", "当前对局将被清除，确定继续？"):
                 return
@@ -490,12 +501,12 @@ class GoApp:
             on_disconnect=self._on_network_disconnect,
             on_connected=self._on_network_connected)
 
-        self._my_color = COLOR_BLACK  # 主机执黑
         self._reset_with_current_board()
         self._disable_connect_buttons()
 
         self.net.start_server(port, name="主机")
-        self.net_status_label.config(text=f"等待连接... 端口 {port}")
+        color_name = "⚫ 黑方" if self._my_color == COLOR_BLACK else "⚪ 白方"
+        self.net_status_label.config(text=f"等待连接... ({color_name}) 端口 {port}")
         self._start_poll()
 
     def _join_game(self):
