@@ -12,6 +12,11 @@
 """
 
 from .core import GoGame
-from .board import BoardCanvas
-from .app import GoApp
 from . import sgf
+
+# BoardCanvas 和 GoApp 依赖 tkinter，在无图形环境（如服务器）下跳过
+try:
+    from .board import BoardCanvas
+    from .app import GoApp
+except ImportError:
+    pass
