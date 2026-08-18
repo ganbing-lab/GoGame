@@ -117,6 +117,10 @@ button.ghost { background: transparent; border: 1px dashed var(--line); color: v
 .tip { font-size: 11px; color: var(--text-dim); line-height: 1.7; margin-top: 6px; }
 
 footer { padding: 6px 16px 18px; font-size: 12px; color: var(--text-dim); text-align: center; }
+#version-tag {
+  position: fixed; left: 12px; bottom: 8px; z-index: 10;
+  font-size: 11px; color: rgba(232,224,210,0.4); user-select: none;
+}
 
 @media (max-width: 880px) {
   main { flex-direction: column; align-items: center; }
@@ -208,6 +212,7 @@ footer { padding: 6px 16px 18px; font-size: 12px; color: var(--text-dim); text-a
 </main>
 
 <footer>点击空位落子 · 虚手两次或点击「终局」进入计分 · 支持将异形棋盘 JSON 导入使用</footer>
+<div id="version-tag"></div>
 
 <!-- PeerJS：联机对战所需的 WebRTC 信令（公共免费服务器）。
      主 CDN 加载失败时自动回退到 jsdelivr；两者都失败则联机不可用，

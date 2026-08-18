@@ -10,6 +10,7 @@
 /* ───────── 常量 ───────── */
 const CELL = 36;
 const MARGIN = 44;
+const APP_VERSION = "v1.0.0";
 
 /* ───────── 全局状态 ───────── */
 let game = null;            // GoGame 实例
@@ -60,6 +61,7 @@ const btnLeaveNet = document.getElementById("btn-leave-net");
 const btnImport = document.getElementById("btn-import");
 const boardFile = document.getElementById("board-file");
 const boardNameEl = document.getElementById("board-name");
+const versionEl = document.getElementById("version-tag");
 
 /* ═══════════════════════ 棋盘尺寸与坐标 ═══════════════════════ */
 function boardPx() {
@@ -957,6 +959,7 @@ boardFile.addEventListener("change", (e) => {
 
 /* ═══════════════════════ 初始化 ═══════════════════════ */
 function init() {
+  versionEl.textContent = APP_VERSION;
   // 下拉框（末尾追加"自定义…"占位）
   for (let i = 0; i < BOARD_PRESETS.length; i++) {
     const o = document.createElement("option");
