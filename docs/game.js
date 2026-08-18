@@ -8,7 +8,7 @@
 "use strict";
 
 /* ───────── 常量 ───────── */
-const APP_VERSION = "v2.0.0";
+const APP_VERSION = "v2.0.1";
 
 // 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
 let CELL = 36;
