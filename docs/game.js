@@ -1,14 +1,14 @@
 /* ============================================================
  * game.js — 围棋网页版 UI 与交互
  *   · 本地双人对弈（同屏轮流）
- *   · 联机对战（WebRTC 点对点，PeerJS，纯静态可托管于 GitHub Pages）
+ *   · 联机对战（服务器中继：server/server.py 托管页面 + 状态中转）
  *   · 异形棋盘（内置预设 / 导入 JSON）
  *   · 终局计分：自动死子检测 + 手动标记，数目法 / 数子法双显示
  * ============================================================ */
 "use strict";
 
 /* ───────── 常量 ───────── */
-const APP_VERSION = "v1.4.1";
+const APP_VERSION = "v2.0.0";
 
 // 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
 let CELL = 36;
@@ -32,12 +32,14 @@ let regionOwner = new Map();// 空区域手动归属：区域代表点 -> BLACK|
 let hoverPos = null;
 let hintTimer = null;
 
-// 联机
-let netState = "local";     // local | host | guest
+// 联机（服务器模式）
+let netState = "local";     // local | srv
 let netMyColor = null;      // 联机时自己的颜色
-let peer = null;            // Peer 实例
-let netConn = null;         // DataConnection
-let myRoomCode = "";
+let SERVER_URL = "";        // 服务器地址：空 = 同源（页面由 server.py 托管）；跨源填 http(s)://IP:端口 或穿透域名
+let srvRoom = "";           // 房间号
+let srvToken = "";          // 玩家令牌
+let srvPollTimer = null;
+let lastSyncSig = "";       // 最近一次应用的状态签名（避免轮询重复渲染）
 
 /* ───────── DOM ───────── */
 const canvas = document.getElementById("board");
@@ -68,6 +70,7 @@ const roomInfo = document.getElementById("room-info");
 const netStatusEl = document.getElementById("net-status");
 const btnLeaveNet = document.getElementById("btn-leave-net");
 const btnNetCheck = document.getElementById("btn-net-check");
+const serverUrlEl = document.getElementById("server-url");
 const btnImport = document.getElementById("btn-import");
 const boardFile = document.getElementById("board-file");
 const boardNameEl = document.getElementById("board-name");
@@ -335,16 +338,12 @@ function render() {
 
 /* ═══════════════════════ 对局操作 ═══════════════════════ */
 function netConnected() {
-  return netState !== "local" && !!netConn && netConn.open;
+  return netState === "srv";
 }
 
 function canActNow() {
   if (mode !== "playing" || game.gameOver) return false;
-  if (netState !== "local") {
-    // 连接未建立（如房主等待对方加入）→ 可自由落子，连接后一次性全量同步
-    if (!netConnected()) return true;
-    return game.current === netMyColor;
-  }
+  if (netState === "srv") return game.current === netMyColor;
   return true;
 }
 
@@ -384,7 +383,7 @@ function tryPlay(r, c) {
   const taken = game.play(r, c);
   if (taken === -1) { flashHint("此处不能落子"); return; }
   navPos = game.moves.length;
-  netSend({ type: "move", s: buildSync() });   // 每步棋携带完整局面
+  srvPush();   // 每步棋提交完整局面到服务器
   render();
   updatePanel();
   if (taken > 0) flashHint("提 " + taken + " 子");
@@ -401,7 +400,7 @@ function doPass() {
     render();
     updatePanel();
   }
-  netSend({ type: "pass", s: buildSync() });
+  srvPush();
 }
 
 function doEndGame() {
@@ -409,7 +408,7 @@ function doEndGame() {
   if (!confirm("确定终局吗？将进入标记计分阶段。")) return;
   game.gameOver = true;
   enterScoring();
-  netSend({ type: "endGame", s: buildSync() });
+  srvPush();
 }
 
 function doResign() {
@@ -417,7 +416,7 @@ function doResign() {
   const name = game.current === COLOR_BLACK ? "黑方" : "白方";
   if (!confirm(name + "确定认输吗？")) return;
   game.resign();
-  netSend({ type: "resign", s: buildSync() });
+  srvPush();
   render();
   updatePanel();
 }
@@ -435,7 +434,7 @@ function doNewGame() {
   if (netState !== "local") {
     if (!confirm("确定重新开始本局吗？对方也会收到重开通知。")) return;
     newGameWith(boardConfig);
-    netSend({ type: "rematch", s: buildSync() });
+    srvPush();
     return;
   }
   newGameWith(boardConfig);
@@ -455,7 +454,7 @@ function autoDetectAgain() {
   if (mode !== "scoring" || scoringLocked) return;
   deadSet = new Set(game.autoDetectDead());
   regionOwner = new Map();
-  netSend({ type: "autodead", s: buildSync() });
+  srvPush();
   render();
   updatePanel();
 }
@@ -489,7 +488,7 @@ function handleScoringClick(r, c) {
     if (next === null) regionOwner.delete(rep);
     else regionOwner.set(rep, next);
   }
-  netSend({ type: "mark", s: buildSync() });   // 标记结果随完整局面同步
+  srvPush();   // 标记结果随完整局面同步
   render();
   updatePanel();
 }
@@ -527,17 +526,7 @@ function resumeFromScoring() {
   updatePanel();
 }
 
-/* ═══════════════════════ 联机（PeerJS / WebRTC） ═══════════════════════ */
-function peerAvailable() {
-  return typeof Peer !== "undefined";
-}
-
-function netSend(msg) {
-  if (netConn && netConn.open) {
-    try { netConn.send(msg); } catch (e) { /* ignore */ }
-  }
-}
-
+/* ═══════════════════════ 联机（服务器中继模式） ═══════════════════════ */
 /** 构建完整局面数据包：棋盘 + 全部落子历史 + 计分/终局状态 */
 function buildSync() {
   return {
@@ -554,9 +543,12 @@ function buildSync() {
   };
 }
 
-/** 全量应用对方发来的局面数据包（直接恢复为发送方状态） */
+/** 全量应用服务器上的局面数据包（签名相同则跳过，避免轮询重复渲染） */
 function applySync(s) {
   if (!s || !s.board) return;
+  const sig = JSON.stringify(s);
+  if (sig === lastSyncSig) return;
+  lastSyncSig = sig;
   applyBoardConfig(s.board, true);
   if (Array.isArray(s.moves) && s.moves.length) {
     game.moves = s.moves.map((m) => ({ r: m.r, c: m.c, color: m.color }));
@@ -582,226 +574,116 @@ function netStatus(text) {
   netStatusEl.textContent = text;
 }
 
-// ═══ PeerJS 信令/中继服务器配置 ═══
-// 默认使用官方公共云（0.peerjs.com）。
-// iceServers 提供 STUN（打洞）+ TURN（中继兜底），使用免费的 OpenRelay TURN，
-// 能显著提高不同局域网/严格 NAT 环境下的连接成功率。
-// 若仍连不上，可自建 PeerServer 后把 host/port/path 填进来（见 docs/README.md）：
-// const PEER_CONFIG = { host: "你的域名或IP", port: 9000, path: "/", config: {...} };
-const PEER_CONFIG = {
-  config: {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-      { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-    ],
-  },
-};
-
-function makePeer(id) {
-  return id ? new Peer(id, PEER_CONFIG) : new Peer(PEER_CONFIG);
-}
-
-/** 把 PeerJS 错误类型翻译成用户能看懂的话 */
-function netErrText(type, raw) {
-  switch (type) {
-    case "peer-unavailable": return "找不到该房间：请确认房间号正确、房主页面在线";
-    case "unavailable-id": return "房间号冲突，请重新创建";
-    case "network": return "网络错误：无法连接信令服务器";
-    case "socket-error": return "信令连接中断（socket-error）";
-    case "socket-closed": return "信令连接已关闭";
-    case "server-error": return "信令服务器错误";
-    case "ssl-error": return "SSL 错误：连接可能被网络拦截";
-    case "disconnected": return "已与信令服务器断开";
-    case "browser-incompatible": return "浏览器不支持 WebRTC，请换用 Chrome / Edge / Safari 最新版";
-    default: return raw || type || "未知错误";
+// ── HTTP API ──
+async function srvFetch(path, body) {
+  const url = SERVER_URL + path;
+  const opts = { method: body ? "POST" : "GET", headers: {} };
+  if (body) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
   }
+  const r = await fetch(url, opts);
+  let data = {};
+  try { data = await r.json(); } catch (e) { /* ignore */ }
+  if (!r.ok) throw new Error((data && data.error) || "请求失败（" + r.status + "）");
+  return data;
 }
 
-function showNetError(e) {
-  const text = netErrText(e && e.type, e && e.message);
-  console.error("net error:", e);
-  netStatus("✗ " + text);
-  flashHint("连接失败：" + text);
-}
-
-// ── 网络检测：PeerJS 库 + WebRTC 支持 + 信令服务器连通性 ──
-let netCheckPeer = null;
-function destroyCheckPeer() {
-  if (netCheckPeer) {
-    try { netCheckPeer.destroy(); } catch (e) { /* ignore */ }
-    netCheckPeer = null;
-  }
-}
-
-function checkNetwork() {
-  destroyCheckPeer();
-  if (!peerAvailable()) {
-    netStatus("✗ PeerJS 库未加载（需联网从 CDN 加载）");
-    return;
-  }
-  const w = typeof window !== "undefined" ? window : {};
-  const rtcOK = !!(w.RTCPeerConnection || w.webkitRTCPeerConnection);
-  netStatus("正在检测网络…");
-  const t0 = Date.now();
+/** 提交完整局面到服务器（每次操作后调用，服务器负责中继给另一方） */
+async function srvPush() {
+  if (netState !== "srv") return;
   try {
-    netCheckPeer = makePeer();
-  } catch (e) {
-    netStatus("✗ 无法创建连接：" + e.message);
-    return;
-  }
-  netCheckPeer.on("open", () => {
-    const ms = Date.now() - t0;
-    netStatus(
-      "✓ 网络正常：信令连接成功（" + ms + "ms）" +
-      (rtcOK ? " · WebRTC 可用" : " · WebRTC 不可用")
-    );
-    destroyCheckPeer();
-  });
-  netCheckPeer.on("error", (e) => {
-    netStatus("✗ 信令服务器连接失败：" + (e.type || e.message || "未知错误"));
-    destroyCheckPeer();
-  });
-  // 兜底超时
-  setTimeout(destroyCheckPeer, 10000);
+    await srvFetch("/api/update/" + srvRoom, { token: srvToken, sync: buildSync() });
+  } catch (e) { /* 静默：轮询会自动纠正 */ }
 }
 
-function makeRoomCode() {
-  return Math.random().toString(36).slice(2, 6).toUpperCase();
-}
-
-function createRoom() {
-  if (!peerAvailable()) {
-    flashHint("无法加载 PeerJS（需联网从 CDN 加载，本地双人不受影响）");
-    return;
-  }
-  destroyCheckPeer();
+/** 创建房间（房主执黑） */
+async function createServerRoom() {
   if (netState !== "local") leaveNet();
-  const code = makeRoomCode();
-  const id = "gogame-" + code;
-  netState = "host";
-  myRoomCode = code;
   try {
-    peer = makePeer(id);
+    const data = await srvFetch("/api/create", {
+      board_config: { name: boardConfig.name, size: boardConfig.size, disabled: [...boardConfig.disabled] },
+    });
+    srvRoom = data.room_id;
+    srvToken = data.token;
+    netState = "srv";
+    netMyColor = data.color === "black" ? COLOR_BLACK : COLOR_WHITE;
+    netStatus("房间已创建，房间号：" + data.room_id + "，等待对方加入…");
+    if (data.state) applySync(data.state);
+    await srvPush();   // 立即提交当前局面（含房主先下的棋），对方加入即可看到
+    startSrvPoll();
+    updatePanel();
   } catch (e) {
+    netStatus("✗ 创建失败：" + e.message);
     flashHint("创建失败：" + e.message);
     netState = "local";
-    return;
   }
-  peer.on("open", () => {
-    netStatus("房间已创建，房间号：" + code + "，等待对方加入…");
-    // 长时间无人加入的提示
-    setTimeout(() => {
-      if (netState === "host" && (!netConn || !netConn.open)) {
-        netStatus("房间号：" + code + "（等待中…把房间号发给对方，对方点「加入房间」输入即可）");
-      }
-    }, 30000);
-  });
-  peer.on("connection", (conn) => {
-    netConn = conn;
-    conn.on("open", onNetConnected);
-    conn.on("data", handleNetMsg);
-    conn.on("close", onNetClosed);
-    conn.on("error", showNetError);
-  });
-  peer.on("error", (e) => {
-    console.error("peer error:", e);
-    if (e.type === "unavailable-id") {
-      netStatus("✗ 房间号冲突，请重新创建");
-      leaveNet();
-    } else {
-      showNetError(e);
-    }
-  });
-  updatePanel();
 }
 
-function joinRoom(code) {
-  if (!peerAvailable()) {
-    flashHint("无法加载 PeerJS（需联网从 CDN 加载，本地双人不受影响）");
-    return;
-  }
-  destroyCheckPeer();
+/** 加入房间（后到执白） */
+async function joinServerRoom(code) {
   if (netState !== "local") leaveNet();
-  code = (code || "").trim().toUpperCase();
-  if (!/^[A-Z0-9]{4}$/.test(code)) { flashHint("房间号格式：4 位字母数字"); return; }
-  netState = "guest";
+  code = (code || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{6}$/.test(code)) { flashHint("房间号：6 位字母数字"); return; }
   try {
-    peer = makePeer();
+    const data = await srvFetch("/api/join/" + code, {});
+    srvRoom = data.room_id;
+    srvToken = data.token;
+    netState = "srv";
+    netMyColor = data.color === "black" ? COLOR_BLACK : COLOR_WHITE;
+    netStatus("已加入房间！" + (netMyColor === COLOR_BLACK ? "你执黑" : "你执白"));
+    if (data.state) applySync(data.state);
+    startSrvPoll();
+    updatePanel();
   } catch (e) {
-    flashHint("连接失败：" + e.message);
+    netStatus("✗ 加入失败：" + e.message);
+    flashHint("加入失败：" + e.message);
     netState = "local";
-    return;
-  }
-  peer.on("open", () => {
-    const conn = peer.connect("gogame-" + code, { reliable: true });
-    netConn = conn;
-    conn.on("open", onNetConnected);
-    conn.on("data", handleNetMsg);
-    conn.on("close", onNetClosed);
-    conn.on("error", showNetError);
-    netStatus("正在加入房间 " + code + " …");
-    // 连接超时提示：15 秒仍未建立数据通道
-    setTimeout(() => {
-      if (netState === "guest" && netConn && !netConn.open) {
-        netStatus(
-          "✗ 连接超时：请确认 ①房间号正确 ②房主页面保持打开 ③双方网络可穿透（严格内网/跨网可点「网络检测」或换同一 WiFi 重试）"
-        );
-        flashHint("连接超时：请核对房主是否在线，或换网络重试");
-      }
-    }, 15000);
-  });
-  peer.on("error", (e) => {
-    console.error("peer error:", e);
-    showNetError(e);
-  });
-  updatePanel();
-}
-
-function onNetConnected() {
-  if (netState === "host") {
-    netMyColor = COLOR_BLACK;
-    netStatus("已连接！对方为白方，你执黑先行。");
-    // 发送完整局面数据包（棋盘 + 全部落子历史 + 计分状态）
-    netConn.send({ type: "hello", s: buildSync() });
-  } else {
-    netMyColor = COLOR_WHITE;
-    netStatus("已连接，等待房主发送棋盘…");
-  }
-  updatePanel();
-}
-
-function handleNetMsg(msg) {
-  if (!msg || typeof msg !== "object") return;
-  // 任何消息都携带完整局面数据包，收到后直接全量恢复为发送方状态
-  if (msg.s) applySync(msg.s);
-  if (msg.type === "hello" && netState === "guest") {
-    netStatus("已加入房间！对方执黑，你执白。");
   }
 }
 
-function cleanupPeer() {
-  if (netConn) { try { netConn.close(); } catch (e) { /* ignore */ } }
-  netConn = null;
-  if (peer) { try { peer.destroy(); } catch (e) { /* ignore */ } }
-  peer = null;
+/** 轮询服务器状态（500ms），有变化才应用 */
+function startSrvPoll() {
+  stopSrvPoll();
+  const poll = async () => {
+    if (netState !== "srv") return;
+    try {
+      const data = await srvFetch("/api/state/" + srvRoom + "?token=" + srvToken);
+      if (data.sync) applySync(data.sync);
+    } catch (e) { /* 忽略，下轮重试 */ }
+    if (netState === "srv") srvPollTimer = setTimeout(poll, 500);
+  };
+  srvPollTimer = setTimeout(poll, 500);
+}
+
+function stopSrvPoll() {
+  if (srvPollTimer) clearTimeout(srvPollTimer);
+  srvPollTimer = null;
+}
+
+/** 检测服务器连接（/api/health） */
+async function checkServer() {
+  if (!SERVER_URL) { netStatus("请先填写服务器地址"); return; }
+  netStatus("正在检测服务器…");
+  const t0 = Date.now();
+  try {
+    const data = await srvFetch("/api/health");
+    const ms = Date.now() - t0;
+    netStatus("✓ 服务器正常（" + ms + "ms）· 在线房间 " + (data.rooms || 0) + " 个");
+  } catch (e) {
+    netStatus("✗ 无法连接服务器：" + e.message);
+    flashHint("检测失败：" + e.message);
+  }
 }
 
 function leaveNet() {
-  cleanupPeer();
+  stopSrvPoll();
   netState = "local";
   netMyColor = null;
-  myRoomCode = "";
+  srvRoom = "";
+  srvToken = "";
+  lastSyncSig = "";
   netStatus("");
-  updatePanel();
-}
-
-function onNetClosed() {
-  if (netState === "local") return;
-  flashHint("对方已断开连接");
-  cleanupPeer();
-  netState = "local";
-  netMyColor = null;
   updatePanel();
 }
 
@@ -868,18 +750,15 @@ function updatePanel() {
     roomInfo.classList.add("hidden");
     btnCreateRoom.disabled = false;
     btnJoinRoom.disabled = false;
+    serverUrlEl.disabled = false;
     btnLeaveNet.classList.add("hidden");
   } else {
     btnCreateRoom.disabled = true;
     btnJoinRoom.disabled = true;
+    serverUrlEl.disabled = true;
     btnLeaveNet.classList.remove("hidden");
-    if (netState === "host") {
-      roomInfo.classList.remove("hidden");
-      roomInfo.innerHTML = "房间号：<b>" + myRoomCode + "</b> · 你执黑";
-    } else {
-      roomInfo.classList.remove("hidden");
-      roomInfo.innerHTML = "你执白";
-    }
+    roomInfo.classList.remove("hidden");
+    roomInfo.innerHTML = "房间号：<b>" + srvRoom + "</b> · " + (netMyColor === COLOR_BLACK ? "你执黑" : "你执白");
   }
 }
 
@@ -955,7 +834,7 @@ btnConfirm.addEventListener("click", () => {
   if (mode !== "scoring" || scoringLocked) return;
   if (!confirm("确认当前结果为最终结果吗？")) return;
   scoringLocked = true;
-  netSend({ type: "confirm", s: buildSync() });
+  srvPush();
   render();
   updatePanel();
 });
@@ -963,23 +842,32 @@ btnResume.addEventListener("click", () => {
   if (mode !== "scoring" || scoringLocked) return;
   if (!confirm("返回对局继续下棋？")) return;
   resumeFromScoring();
-  netSend({ type: "resume", s: buildSync() });
+  srvPush();
 });
 
-btnCreateRoom.addEventListener("click", createRoom);
+/** 读取服务器地址输入并记忆 */
+function readServerUrl() {
+  const v = (serverUrlEl.value || "").trim().replace(/\/+$/, "");
+  SERVER_URL = v;
+  try { localStorage.setItem("gogame-server-url", SERVER_URL); } catch (e) { /* ignore */ }
+}
+
+btnCreateRoom.addEventListener("click", () => { readServerUrl(); createServerRoom(); });
 btnJoinRoom.addEventListener("click", () => joinBox.classList.toggle("hidden"));
 btnDoJoin.addEventListener("click", () => {
-  joinRoom(roomInput.value);
+  readServerUrl();
+  joinServerRoom(roomInput.value);
   joinBox.classList.add("hidden");
 });
 roomInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
-    joinRoom(roomInput.value);
+    readServerUrl();
+    joinServerRoom(roomInput.value);
     joinBox.classList.add("hidden");
   }
 });
 btnLeaveNet.addEventListener("click", leaveNet);
-btnNetCheck.addEventListener("click", checkNetwork);
+btnNetCheck.addEventListener("click", () => { readServerUrl(); checkServer(); });
 
 boardSel.addEventListener("change", () => {
   if (netState !== "local") {
@@ -1019,6 +907,11 @@ boardFile.addEventListener("change", (e) => {
 /* ═══════════════════════ 初始化 ═══════════════════════ */
 function init() {
   versionEl.textContent = APP_VERSION;
+  // 恢复上次填写的服务器地址
+  try {
+    const savedUrl = localStorage.getItem("gogame-server-url");
+    if (savedUrl) { SERVER_URL = savedUrl; serverUrlEl.value = savedUrl; }
+  } catch (e) { /* ignore */ }
   // 窗口尺寸变化时重算棋盘布局（手机横竖屏切换）
   if (typeof window !== "undefined" && window.addEventListener) {
     window.addEventListener("resize", () => {

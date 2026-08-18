@@ -1,7 +1,7 @@
 # 围棋 GoGame · 网页版
 
-纯静态网页围棋客户端，**双人对弈 / 联机对战**，支持**异形棋盘**。
-可直接部署到 GitHub Pages（免费），无需任何服务器。
+网页围棋客户端，**双人对弈 / 服务器联机对战**，支持**异形棋盘**。
+页面本身是纯静态，可部署到 GitHub Pages；联机需要一个轻量服务器（`server/server.py`）。
 
 ## 功能
 
@@ -11,15 +11,35 @@
   点击空点轮换领地归属），**数目法（日本）与数子法（中国）双显示**
 - **异形棋盘**：内置 9 种异形棋盘（迷宫、十字架、四叶草、回字四角挖空、天元孤岛、
   棋盘碎片、南北分断一门、X 形对角、无中心 9 格），并支持导入自定义棋盘 JSON
-- **联机对战**：WebRTC 点对点（PeerJS），创建房间生成 4 位房间号，对方输入即可直连，
-  无需注册、无需服务器；房主执黑、加入者执白
+- **联机对战（服务器模式）**：房主创建房间生成 6 位房间号，对方输入即可加入；
+  服务器只做**状态中继**（规则在两端各跑同一引擎），对局实时全量同步；
+  房主执黑、加入者执白
 - 响应式界面：手机 / 电脑均可玩
 
-## 本地运行
+## 本地运行（单机双人）
 
 直接双击打开 `index.html` 即可（无需安装任何东西）。
 
-> 联机对战需要联网加载 PeerJS（从 CDN），纯本地双人对弈不依赖网络。
+## 联机对战（推荐：自己电脑跑服务器）
+
+```bash
+# 1. 启动服务器（页面与 API 同源，一条命令）
+python server/server.py --port 8080
+
+# 2. 浏览器打开 http://<本机IP>:8080/    （本机测试可填 127.0.0.1）
+#    其它设备（手机/朋友）填你的局域网 IP，如 http://192.168.1.5:8080
+#    服务器地址也可以填在页面「服务器地址」输入框（跨源时填 http://IP:端口）
+```
+
+- 房主点「创建房间」→ 得到 6 位房间号，发给对方
+- 对方打开页面 → 填服务器地址 → 「加入房间」→ 输入房间号
+- **跨公网联机**：如果你有 HTTP 内网穿透（ngrok / cpolar / frp 等），把 8080
+  端口穿透出去，把穿透域名填进「服务器地址」即可，任何网络都能加入
+- 前端放 GitHub Pages（https）时连穿透域名：需穿透服务支持 HTTPS（多数支持），
+  服务器已带 CORS 头，跨源访问没问题
+
+> 服务器只做状态中转（房间 + 最新局面存储），不做规则计算、没有 NAT/穿透问题，
+> 手机热点、公司内网等都能稳定联机。房间 1 小时无活动自动清理。
 
 ## 项目结构
 
@@ -29,7 +49,9 @@ docs/
   boards.js     — 内置棋盘预设（与仓库 boards/*.json 同格式）
   engine.js     — 规则引擎（纯逻辑，可独立测试）
   game.js       — 绘制 / 交互 / 联机
-  tests/        — 引擎单元测试（node docs/tests/engine.test.js）
+  tests/        — 测试（引擎 / 页面流程 / 服务器联机集成）
+server/
+  server.py     — 联机服务器（状态中继 + 托管 docs/ 页面，纯标准库）
 ```
 
 ## 自定义棋盘
@@ -51,60 +73,37 @@ docs/
 
 ---
 
-## 部署到 GitHub Pages（免费托管）
+## 部署到 GitHub Pages（页面托管）
 
 GitHub Pages 是 GitHub 提供的**静态网页托管**：把你的网页文件推送到仓库，
 GitHub 就自动生成一个 `https://你的用户名.github.io/仓库名/` 的网址。
-因为本应用是纯 HTML / JS / CSS（无后端），完全兼容 GitHub Pages。
+
+> 注意：GitHub Pages 只托管**页面**。联机对战需要额外的 `server/server.py`
+> 服务器（见上文"联机对战"），页面可以放 Pages，服务器放你自己电脑 / 内网穿透。
 
 本仓库已推到 GitHub（`ganbing-lab/GoGame`），`docs/` 目录就是网页版，
 启用 Pages 后网址为：`https://ganbing-lab.github.io/GoGame/`
 
-### 方法一：本仓库启用 /docs（推荐，最简单）
+### 启用步骤
 
-1. 把 `docs/` 目录提交并推送到 GitHub 仓库（本仓库已推送过，改完运行
-   `./upload_to_github.sh "网页版"` 或手动 `git push`）
-2. 打开仓库页面 → 点 **Settings**（设置）
-3. 左侧菜单找到 **Pages**（页面）
-4. **Source（源）** 选择 **Deploy from a branch（从分支部署）**
-5. **Branch（分支）** 选 `main`，文件夹选 `/docs`
-6. 点 **Save（保存）**，等 1~2 分钟
-7. 访问 `https://ganbing-lab.github.io/GoGame/`
+1. 把 `docs/` 目录提交并推送到 GitHub 仓库（改完运行 `./upload_to_github.sh "更新"`）
+2. 仓库页面 → **Settings** → 左侧 **Pages**
+3. **Source** 选 **Deploy from a branch**，分支 `main`，文件夹 `/docs` → **Save**
+4. 等 1~2 分钟，访问 `https://ganbing-lab.github.io/GoGame/`
 
-以后每次修改推送后，页面自动更新。
-
-### 方法二：新建独立仓库（只要网页版）
-
-1. 在 GitHub 新建一个仓库（如 `go-game`，Public）
-2. 把 `docs/` 里的 4 个文件（`index.html`、`boards.js`、`engine.js`、`game.js`）
-   上传到新仓库根目录
-3. 仓库 Settings → Pages → Source 选 `main` 分支、`/ (root)` 根目录 → Save
-4. 访问 `https://ganbing-lab.github.io/go-game/`
-
-### 方法三：本地直接预览
+### 本地直接预览
 
 ```bash
-cd docs
-python -m http.server 8000
+python -m http.server 8000 --directory docs
 # 浏览器打开 http://localhost:8000
 ```
 
 ---
 
-## 联机说明
-
-- 一方点「创建房间」→ 生成 4 位房间号（如 `K3PQ`），把房间号发给对方
-- 对方点「加入房间」→ 输入房间号 → 建立点对点连接
-- 房主执黑先手，棋盘由房主选择（加入者自动同步）
-- **完整局面同步**：无论对方何时加入（包括房主已下了很多手、甚至已进入计分阶段），
-  连接建立时都会发送整盘数据包（棋盘 + 全部落子历史 + 计分状态），对方加入即看到完整棋局
-- 依赖 PeerJS 公共信令服务器（`0.peerjs.com`）；若你的网络访问不畅，
-  可以自建 PeerServer 并把 `game.js` 中的 `new Peer(...)` 换成自定义配置
-
-## 引擎测试
+## 引擎与测试
 
 ```bash
-node docs/tests/engine.test.js
+node docs/tests/engine.test.js      # 规则引擎：提子/自杀/打劫/异形棋盘/计分
+node docs/tests/ui.smoke.js         # 页面主流程
+node docs/tests/net.sync.test.js    # 服务器联机集成测试（自动起真实 server.py）
 ```
-
-覆盖：提子 / 自杀禁止 / 打劫 / 虚手终局 / 翻棋回放 / 异形棋盘边界 / 自动死子检测 / 两种计分法。

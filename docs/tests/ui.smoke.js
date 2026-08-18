@@ -85,9 +85,9 @@ ok("初始化：默认标准 19 路", G().size === 19);
 ok("初始化：状态栏显示黑方", elements["turn"].textContent.indexOf("黑方") >= 0);
 ok("初始化：计分卡片隐藏", elements["scoring-card"].classList.contains("hidden"));
 
-// 网络检测（无 PeerJS 环境）
+// 服务器检测（未填地址时应提示）
 elements["btn-net-check"]._h.click();
-ok("无 PeerJS 时检测给出提示", elements["net-status"].textContent.indexOf("PeerJS") >= 0);
+ok("未填服务器地址时检测给出提示", elements["net-status"].textContent.indexOf("请先填写服务器地址") >= 0);
 
 // 落子
 clickAt(3, 3);
