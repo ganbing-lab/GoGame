@@ -111,6 +111,7 @@ const EXPORT = `
   get netText() { return netStatusEl.textContent; },
   get captures() { return game.captured; },
   get navPos() { return navPos; },
+  get deadSet() { return deadSet; },
 };`;
 
 function loadApp(sb) {
@@ -224,10 +225,12 @@ async function main() {
   ok("对方同步为计分阶段", G2.mode === "scoring");
   ok("对方同步看到 2 手棋子", G2.game.moves.length === 2 && G2.game.board[3][3] === 1 && G2.game.board[3][4] === 2);
   ok("双方局面一致", JSON.stringify(H2.game.board) === JSON.stringify(G2.game.board));
-  // 双方都能标记死子（不崩）
+  // 房主标记死子（点击 (3,3)）→ 双方 deadSet 同步
   clickAt(h2.elements, 3, 3);
   await flush();
-  ok("房主标记死子后对方同步", true); // 标记同步走 mark 消息，双方各自渲染
+  ok("房主标记后自己 deadSet 更新", H2.deadSet.has("3,3"));
+  ok("对方 deadSet 同步", G2.deadSet.has("3,3"));
+  ok("双方 deadSet 完全一致", JSON.stringify([...H2.deadSet].sort()) === JSON.stringify([...G2.deadSet].sort()));
 
   console.log("\n" + (failed ? "✗ 存在失败" : "✓ 联机同步测试通过") + "（" + passed + " 通过，失败 " + failed + "）");
   process.exitCode = failed ? 1 : 0;

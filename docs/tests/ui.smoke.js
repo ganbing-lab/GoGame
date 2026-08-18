@@ -57,10 +57,12 @@ eval(code + `
   get game() { return game; },
   get mode() { return mode; },
   get scoringLocked() { return scoringLocked; },
+  get deadSet() { return deadSet; },
 };`);
 const G = () => __test.game;
 const M = () => __test.mode;
 const L = () => __test.scoringLocked;
+const D = () => __test.deadSet;
 
 let passed = 0, failed = 0;
 function ok(name, cond) {
@@ -115,6 +117,13 @@ ok("计分结果包含数子法", elements["scores"].innerHTML.indexOf("数子�
 // 自动死子检测（空盘不报错）
 elements["btn-autodead"]._h.click();
 ok("自动死子检测可执行", M() === "scoring");
+
+// 整串死子标记：棋盘有黑(3,3)、白(3,4)、黑(4,3)，其中两个黑子连通
+clickAt(3, 3);   // 点击黑(3,3) → 同串黑(4,3) 应一起标记
+ok("整串标记死子：两连通黑子同标记", D().has("3,3") && D().has("4,3"));
+ok("不相关白子未标记", !D().has("3,4"));
+clickAt(4, 3);   // 再点同串任一子 → 整串取消
+ok("整串取消：两黑子同取消", !D().has("3,3") && !D().has("4,3"));
 
 // 确认终局
 elements["btn-confirm"]._h.click();

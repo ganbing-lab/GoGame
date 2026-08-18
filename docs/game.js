@@ -445,14 +445,25 @@ function autoDetectAgain() {
   updatePanel();
 }
 
+/** 整串切换死/活：点击 (r,c) 所在同色连通棋串，整串一起标记或取消 */
+function toggleDeadGroup(r, c) {
+  if (!game.inBounds(r, c) || game.board[r][c] === COLOR_EMPTY) return;
+  const grp = game.group(r, c);
+  const keys = grp.map(([rr, cc]) => gkey(rr, cc));
+  const allDead = keys.every((kk) => deadSet.has(kk));
+  if (allDead) {
+    for (const kk of keys) deadSet.delete(kk);
+  } else {
+    for (const kk of keys) deadSet.add(kk);
+  }
+}
+
 function handleScoringClick(r, c) {
   if (mode !== "scoring" || scoringLocked) return;
-  const k = gkey(r, c);
   const cell = game.board[r][c];
   if (cell !== COLOR_EMPTY) {
-    // 切换死/活
-    if (deadSet.has(k)) deadSet.delete(k);
-    else deadSet.add(k);
+    // 点击棋子：自动选中整个连通棋串一起切换死/活
+    toggleDeadGroup(r, c);
     netSend({ type: "mark", r, c });
   } else {
     // 轮换空区域归属：自动 → 黑 → 白 → 自动
@@ -667,11 +678,10 @@ function handleNetMsg(msg) {
       break;
     case "mark":
       if (mode === "scoring" && !scoringLocked) {
-        const k = gkey(msg.r, msg.c);
         const cell = game.board[msg.r][msg.c];
         if (cell !== COLOR_EMPTY) {
-          if (deadSet.has(k)) deadSet.delete(k);
-          else deadSet.add(k);
+          // 与本地一致：整串切换死/活
+          toggleDeadGroup(msg.r, msg.c);
         } else {
           const cells = game.emptyRegionAt(msg.r, msg.c, deadSet);
           if (cells.length) {
