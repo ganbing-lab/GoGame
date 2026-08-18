@@ -8,7 +8,7 @@
 "use strict";
 
 /* ───────── 常量 ───────── */
-const APP_VERSION = "v1.1.0";
+const APP_VERSION = "v1.2.0";
 
 // 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
 let CELL = 36;
@@ -383,7 +383,7 @@ function tryPlay(r, c) {
   const taken = game.play(r, c);
   if (taken === -1) { flashHint("此处不能落子"); return; }
   navPos = game.moves.length;
-  netSend({ type: "move", r, c });
+  netSend({ type: "move", s: buildSync() });   // 每步棋携带完整局面
   render();
   updatePanel();
   if (taken > 0) flashHint("提 " + taken + " 子");
@@ -394,21 +394,21 @@ function doPass() {
   if (navPos < game.moves.length) jumpTo(game.moves.length);
   const ended = game.passMove();
   navPos = game.moves.length;
-  netSend({ type: "pass" });
   if (ended) {
     enterScoring();
   } else {
     render();
     updatePanel();
   }
+  netSend({ type: "pass", s: buildSync() });
 }
 
 function doEndGame() {
   if (mode !== "playing" || game.gameOver) return;
   if (!confirm("确定终局吗？将进入标记计分阶段。")) return;
   game.gameOver = true;
-  netSend({ type: "endGame" });
   enterScoring();
+  netSend({ type: "endGame", s: buildSync() });
 }
 
 function doResign() {
@@ -416,7 +416,7 @@ function doResign() {
   const name = game.current === COLOR_BLACK ? "黑方" : "白方";
   if (!confirm(name + "确定认输吗？")) return;
   game.resign();
-  netSend({ type: "resign" });
+  netSend({ type: "resign", s: buildSync() });
   render();
   updatePanel();
 }
@@ -433,7 +433,9 @@ function doUndo() {
 function doNewGame() {
   if (netState !== "local") {
     if (!confirm("确定重新开始本局吗？对方也会收到重开通知。")) return;
-    netSend({ type: "rematch" });
+    newGameWith(boardConfig);
+    netSend({ type: "rematch", s: buildSync() });
+    return;
   }
   newGameWith(boardConfig);
 }
@@ -452,7 +454,7 @@ function autoDetectAgain() {
   if (mode !== "scoring" || scoringLocked) return;
   deadSet = new Set(game.autoDetectDead());
   regionOwner = new Map();
-  netSend({ type: "autodead" });
+  netSend({ type: "autodead", s: buildSync() });
   render();
   updatePanel();
 }
@@ -476,7 +478,6 @@ function handleScoringClick(r, c) {
   if (cell !== COLOR_EMPTY) {
     // 点击棋子：自动选中整个连通棋串一起切换死/活
     toggleDeadGroup(r, c);
-    netSend({ type: "mark", r, c });
   } else {
     // 轮换空区域归属：自动 → 黑 → 白 → 自动
     const cells = game.emptyRegionAt(r, c, deadSet);
@@ -486,8 +487,8 @@ function handleScoringClick(r, c) {
     const next = cur === null ? COLOR_BLACK : cur === COLOR_BLACK ? COLOR_WHITE : null;
     if (next === null) regionOwner.delete(rep);
     else regionOwner.set(rep, next);
-    netSend({ type: "mark", r, c });
   }
+  netSend({ type: "mark", s: buildSync() });   // 标记结果随完整局面同步
   render();
   updatePanel();
 }
@@ -534,6 +535,46 @@ function netSend(msg) {
   if (netConn && netConn.open) {
     try { netConn.send(msg); } catch (e) { /* ignore */ }
   }
+}
+
+/** 构建完整局面数据包：棋盘 + 全部落子历史 + 计分/终局状态 */
+function buildSync() {
+  return {
+    board: { name: boardConfig.name, size: boardConfig.size, disabled: [...boardConfig.disabled] },
+    moves: game.moves.map((m) => ({ r: m.r, c: m.c, color: m.color })),
+    mode: mode,
+    dead: [...deadSet],
+    regionOwner: [...regionOwner.entries()],
+    scoringLocked: scoringLocked,
+    gameOver: game.gameOver,
+    winner: game.winner,
+    captured: { [COLOR_BLACK]: game.captured[COLOR_BLACK], [COLOR_WHITE]: game.captured[COLOR_WHITE] },
+    passCount: game.passCount,
+  };
+}
+
+/** 全量应用对方发来的局面数据包（直接恢复为发送方状态） */
+function applySync(s) {
+  if (!s || !s.board) return;
+  applyBoardConfig(s.board, true);
+  if (Array.isArray(s.moves) && s.moves.length) {
+    game.moves = s.moves.map((m) => ({ r: m.r, c: m.c, color: m.color }));
+    game.replayTo(game.moves.length);
+    navPos = game.moves.length;
+  }
+  game.gameOver = !!s.gameOver;
+  game.winner = s.winner || null;
+  game.passCount = s.passCount || 0;
+  if (s.captured) {
+    game.captured[COLOR_BLACK] = s.captured[COLOR_BLACK] || 0;
+    game.captured[COLOR_WHITE] = s.captured[COLOR_WHITE] || 0;
+  }
+  mode = s.mode === "scoring" ? "scoring" : "playing";
+  scoringLocked = !!s.scoringLocked;
+  deadSet = new Set(s.dead || []);
+  regionOwner = new Map(s.regionOwner || []);
+  render();
+  updatePanel();
 }
 
 function netStatus(text) {
@@ -619,16 +660,8 @@ function onNetConnected() {
   if (netState === "host") {
     netMyColor = COLOR_BLACK;
     netStatus("已连接！对方为白方，你执黑先行。");
-    // 发送完整局面数据包：棋盘 + 全部落子历史 + 计分状态
-    netConn.send({
-      type: "hello",
-      board: { name: boardConfig.name, size: boardConfig.size, disabled: [...boardConfig.disabled] },
-      moves: game.moves.map((m) => ({ r: m.r, c: m.c, color: m.color })),
-      mode: mode,
-      dead: [...deadSet],
-      regionOwner: [...regionOwner.entries()],
-      scoringLocked: scoringLocked,
-    });
+    // 发送完整局面数据包（棋盘 + 全部落子历史 + 计分状态）
+    netConn.send({ type: "hello", s: buildSync() });
   } else {
     netMyColor = COLOR_WHITE;
     netStatus("已连接，等待房主发送棋盘…");
@@ -637,98 +670,11 @@ function onNetConnected() {
 }
 
 function handleNetMsg(msg) {
-  if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
-  switch (msg.type) {
-    case "hello":
-      if (netState === "guest" && msg.board) {
-        // 应用棋盘 + 重放房主的全部落子历史
-        applyBoardConfig(msg.board, true);
-        if (Array.isArray(msg.moves) && msg.moves.length) {
-          game.moves = msg.moves.map((m) => ({ r: m.r, c: m.c, color: m.color }));
-          game.replayTo(game.moves.length);
-          navPos = game.moves.length;
-        }
-        // 房主若已在对局后计分阶段，同步计分状态
-        if (msg.mode === "scoring") {
-          mode = "scoring";
-          scoringLocked = !!msg.scoringLocked;
-          deadSet = new Set(msg.dead || []);
-          regionOwner = new Map(msg.regionOwner || []);
-        }
-        netStatus("已加入房间！对方执黑，你执白。");
-        render();
-        updatePanel();
-      }
-      break;
-    case "move":
-      if (game.board[msg.r] && game.board[msg.r][msg.c] !== undefined) {
-        if (navPos < game.moves.length) jumpTo(game.moves.length);
-        const t = game.play(msg.r, msg.c);
-        navPos = game.moves.length;
-        render();
-        updatePanel();
-        if (t === -1) console.warn("对方落子被引擎拒绝", msg.r, msg.c);
-      }
-      break;
-    case "pass":
-      if (navPos < game.moves.length) jumpTo(game.moves.length);
-      const ended = game.passMove();
-      navPos = game.moves.length;
-      if (ended) enterScoring();
-      else { render(); updatePanel(); }
-      break;
-    case "resign":
-      game.resign();
-      render();
-      updatePanel();
-      break;
-    case "endGame":
-      if (mode === "playing") {
-        game.gameOver = true;
-        enterScoring();
-      }
-      break;
-    case "mark":
-      if (mode === "scoring" && !scoringLocked) {
-        const cell = game.board[msg.r][msg.c];
-        if (cell !== COLOR_EMPTY) {
-          // 与本地一致：整串切换死/活
-          toggleDeadGroup(msg.r, msg.c);
-        } else {
-          const cells = game.emptyRegionAt(msg.r, msg.c, deadSet);
-          if (cells.length) {
-            const rep = cells.map(([rr, cc]) => gkey(rr, cc)).sort()[0];
-            const cur = regionOwner.get(rep) || null;
-            const next = cur === null ? COLOR_BLACK : cur === COLOR_BLACK ? COLOR_WHITE : null;
-            if (next === null) regionOwner.delete(rep);
-            else regionOwner.set(rep, next);
-          }
-        }
-        render();
-        updatePanel();
-      }
-      break;
-    case "autodead":
-      if (mode === "scoring" && !scoringLocked) {
-        deadSet = new Set(game.autoDetectDead());
-        regionOwner = new Map();
-        render();
-        updatePanel();
-      }
-      break;
-    case "confirm":
-      if (mode === "scoring") {
-        scoringLocked = true;
-        render();
-        updatePanel();
-      }
-      break;
-    case "resume":
-      if (mode === "scoring") resumeFromScoring();
-      break;
-    case "rematch":
-      newGameWith(boardConfig);
-      break;
+  if (!msg || typeof msg !== "object") return;
+  // 任何消息都携带完整局面数据包，收到后直接全量恢复为发送方状态
+  if (msg.s) applySync(msg.s);
+  if (msg.type === "hello" && netState === "guest") {
+    netStatus("已加入房间！对方执黑，你执白。");
   }
 }
 
@@ -907,15 +853,15 @@ btnConfirm.addEventListener("click", () => {
   if (mode !== "scoring" || scoringLocked) return;
   if (!confirm("确认当前结果为最终结果吗？")) return;
   scoringLocked = true;
-  netSend({ type: "confirm" });
+  netSend({ type: "confirm", s: buildSync() });
   render();
   updatePanel();
 });
 btnResume.addEventListener("click", () => {
   if (mode !== "scoring" || scoringLocked) return;
   if (!confirm("返回对局继续下棋？")) return;
-  netSend({ type: "resume" });
   resumeFromScoring();
+  netSend({ type: "resume", s: buildSync() });
 });
 
 btnCreateRoom.addEventListener("click", createRoom);

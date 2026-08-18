@@ -232,6 +232,37 @@ async function main() {
   ok("对方 deadSet 同步", G2.deadSet.has("3,3"));
   ok("双方 deadSet 完全一致", JSON.stringify([...H2.deadSet].sort()) === JSON.stringify([...G2.deadSet].sort()));
 
+  console.log("");
+  console.log("═ 场景 3：每步棋全量同步——状态被破坏也能自愈 ═");
+  const bus3 = new NetBus();
+  const h3 = buildSandbox(bus3, "host");
+  const g3 = buildSandbox(bus3, "guest");
+  const H3 = loadApp(h3);
+  const G3 = loadApp(g3);
+  // 本地下 2 手 → 建房 → 对方加入
+  clickAt(h3.elements, 3, 3);
+  clickAt(h3.elements, 3, 4);
+  h3.elements["btn-create-room"]._h.click();
+  await flush();
+  g3.elements["room-input"].value = H3.myRoomCode;
+  g3.elements["btn-do-join"]._h.click();
+  await flush(12);
+  ok("连接后双方一致", JSON.stringify(H3.game.board) === JSON.stringify(G3.game.board));
+  // 人为破坏对方状态：删棋子 + 截断历史
+  G3.game.board[3][3] = 0;
+  G3.game.board[3][4] = 0;
+  G3.game.moves.length = 0;
+  ok("已人为破坏对方状态", G3.game.moves.length === 0 && G3.game.board[3][3] === 0);
+  // 房主下一步棋（携带完整局面数据包）→ 对方应自愈
+  clickAt(h3.elements, 4, 3);
+  await flush();
+  ok("对方自愈：棋子全部恢复且手数一致",
+    G3.game.moves.length === 3 &&
+    G3.game.board[3][3] === 1 &&
+    G3.game.board[3][4] === 2 &&
+    G3.game.board[4][3] === 1);
+  ok("自愈后双方完全一致", JSON.stringify(H3.game.board) === JSON.stringify(G3.game.board));
+
   console.log("\n" + (failed ? "✗ 存在失败" : "✓ 联机同步测试通过") + "（" + passed + " 通过，失败 " + failed + "）");
   process.exitCode = failed ? 1 : 0;
 }
