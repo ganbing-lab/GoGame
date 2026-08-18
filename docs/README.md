@@ -38,6 +38,23 @@ python server/server.py --port 8080
 - 前端放 GitHub Pages（https）时连穿透域名：需穿透服务支持 HTTPS（多数支持），
   服务器已带 CORS 头，跨源访问没问题
 
+### 内网穿透（natapp 免费版）启动步骤
+
+```bash
+# 1. 启动 GoGame 服务器
+python server/server.py --port 8080
+
+# 2. 启动 natapp（natapp.cn 注册 → 下载 natapp.exe → 创建免费隧道端口 8080 →
+#    同目录新建 natapp.ini：authtoken=你的token）→ 双击运行
+#    终端显示 "Tunnel Status: Online" 和域名 xxxx.natappfree.cc
+
+# 3. 把 xxxx.natappfree.cc 填进页面「服务器地址」；对方也用该域名打开页面
+```
+
+> ⚠️ natapp 免费隧道每次启动随机分配域名且有使用时长限制，失效就重启 natapp
+> 拿新域名（报 `Tunnel not found` 即隧道已失效）。
+> 同 WiFi 设备联机不需要穿透，直接用 `http://电脑IP:8080`。
+
 > 服务器只做状态中转（房间 + 最新局面存储），不做规则计算、没有 NAT/穿透问题，
 > 手机热点、公司内网等都能稳定联机。房间 1 小时无活动自动清理。
 
