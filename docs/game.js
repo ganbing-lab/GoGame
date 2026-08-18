@@ -8,7 +8,7 @@
 "use strict";
 
 /* ───────── 常量 ───────── */
-const APP_VERSION = "v1.3.0";
+const APP_VERSION = "v1.4.0";
 
 // 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
 let CELL = 36;
@@ -582,6 +582,38 @@ function netStatus(text) {
   netStatusEl.textContent = text;
 }
 
+// ═══ PeerJS 信令服务器配置 ═══
+// 默认使用官方公共云（0.peerjs.com）。若网络访问不稳，可自建 PeerServer 后取消注释填写：
+// const PEER_CONFIG = { host: "你的域名或IP", port: 9000, path: "/" };
+const PEER_CONFIG = {};
+
+function makePeer(id) {
+  return id ? new Peer(id, PEER_CONFIG) : new Peer(PEER_CONFIG);
+}
+
+/** 把 PeerJS 错误类型翻译成用户能看懂的话 */
+function netErrText(type, raw) {
+  switch (type) {
+    case "peer-unavailable": return "找不到该房间：请确认房间号正确、房主页面在线";
+    case "unavailable-id": return "房间号冲突，请重新创建";
+    case "network": return "网络错误：无法连接信令服务器";
+    case "socket-error": return "信令连接中断（socket-error）";
+    case "socket-closed": return "信令连接已关闭";
+    case "server-error": return "信令服务器错误";
+    case "ssl-error": return "SSL 错误：连接可能被网络拦截";
+    case "disconnected": return "已与信令服务器断开";
+    case "browser-incompatible": return "浏览器不支持 WebRTC，请换用 Chrome / Edge / Safari 最新版";
+    default: return raw || type || "未知错误";
+  }
+}
+
+function showNetError(e) {
+  const text = netErrText(e && e.type, e && e.message);
+  console.error("net error:", e);
+  netStatus("✗ " + text);
+  flashHint("连接失败：" + text);
+}
+
 // ── 网络检测：PeerJS 库 + WebRTC 支持 + 信令服务器连通性 ──
 let netCheckPeer = null;
 function destroyCheckPeer() {
@@ -602,7 +634,7 @@ function checkNetwork() {
   netStatus("正在检测网络…");
   const t0 = Date.now();
   try {
-    netCheckPeer = new Peer();
+    netCheckPeer = makePeer();
   } catch (e) {
     netStatus("✗ 无法创建连接：" + e.message);
     return;
@@ -639,7 +671,7 @@ function createRoom() {
   netState = "host";
   myRoomCode = code;
   try {
-    peer = new Peer(id);
+    peer = makePeer(id);
   } catch (e) {
     flashHint("创建失败：" + e.message);
     netState = "local";
@@ -647,21 +679,27 @@ function createRoom() {
   }
   peer.on("open", () => {
     netStatus("房间已创建，房间号：" + code + "，等待对方加入…");
+    // 长时间无人加入的提示
+    setTimeout(() => {
+      if (netState === "host" && (!netConn || !netConn.open)) {
+        netStatus("房间号：" + code + "（等待中…把房间号发给对方，对方点「加入房间」输入即可）");
+      }
+    }, 30000);
   });
   peer.on("connection", (conn) => {
     netConn = conn;
     conn.on("open", onNetConnected);
     conn.on("data", handleNetMsg);
     conn.on("close", onNetClosed);
-    conn.on("error", (e) => console.error("conn error:", e));
+    conn.on("error", showNetError);
   });
   peer.on("error", (e) => {
     console.error("peer error:", e);
     if (e.type === "unavailable-id") {
-      netStatus("房间号冲突，请重新创建");
+      netStatus("✗ 房间号冲突，请重新创建");
       leaveNet();
     } else {
-      netStatus("连接错误：" + e.type);
+      showNetError(e);
     }
   });
   updatePanel();
@@ -678,7 +716,7 @@ function joinRoom(code) {
   if (!/^[A-Z0-9]{4}$/.test(code)) { flashHint("房间号格式：4 位字母数字"); return; }
   netState = "guest";
   try {
-    peer = new Peer();
+    peer = makePeer();
   } catch (e) {
     flashHint("连接失败：" + e.message);
     netState = "local";
@@ -690,12 +728,19 @@ function joinRoom(code) {
     conn.on("open", onNetConnected);
     conn.on("data", handleNetMsg);
     conn.on("close", onNetClosed);
-    conn.on("error", (e) => console.error("conn error:", e));
+    conn.on("error", showNetError);
     netStatus("正在加入房间 " + code + " …");
+    // 连接超时提示：20 秒仍未建立数据通道
+    setTimeout(() => {
+      if (netState === "guest" && netConn && !netConn.open) {
+        netStatus("✗ 连接超时：请确认房间号正确、房主页面在线，或网络无法穿透");
+        flashHint("连接超时，可点「网络检测」排查，或重新加入");
+      }
+    }, 20000);
   });
   peer.on("error", (e) => {
     console.error("peer error:", e);
-    netStatus("连接错误：" + e.type);
+    showNetError(e);
   });
   updatePanel();
 }

@@ -41,7 +41,12 @@ function makePeerClass(bus, role) {
     on(t, fn) { this._h[t] = fn; }
     connect(id) {
       const host = bus.hosts.get(id);
-      if (!host) throw new Error("host not found: " + id);
+      if (!host) {
+        // 模拟"找不到该房间"：返回连接并触发 peer-unavailable 错误
+        const guestConn = new MockConn();
+        setImmediate(() => guestConn._emit("error", { type: "peer-unavailable", message: "Could not find peer " + id }));
+        return guestConn;
+      }
       const guestConn = new MockConn();
       const hostConn = new MockConn();
       guestConn._peer = hostConn;
@@ -271,6 +276,16 @@ async function main() {
   h4.elements["btn-net-check"]._h.click();
   await flush(8);
   ok("检测显示信令连接成功", H4.netText.indexOf("信令连接成功") >= 0, "text=" + H4.netText);
+
+  console.log("");
+  console.log("═ 场景 5：房间号无效/房主不在线 → 友好错误 ═");
+  const bus5 = new NetBus();
+  const g5 = buildSandbox(bus5, "guest");
+  const G5 = loadApp(g5);
+  g5.elements["room-input"].value = "ZZZZ";
+  g5.elements["btn-do-join"]._h.click();
+  await flush(8);
+  ok("无效房间号给出友好错误", G5.netText.indexOf("找不到该房间") >= 0, "text=" + G5.netText);
 
   console.log("\n" + (failed ? "✗ 存在失败" : "✓ 联机同步测试通过") + "（" + passed + " 通过，失败 " + failed + "）");
   process.exitCode = failed ? 1 : 0;
