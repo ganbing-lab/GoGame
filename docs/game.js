@@ -8,9 +8,18 @@
 "use strict";
 
 /* ───────── 常量 ───────── */
-const CELL = 36;
-const MARGIN = 44;
-const APP_VERSION = "v1.0.0";
+const APP_VERSION = "v1.1.0";
+
+// 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
+let CELL = 36;
+let MARGIN = 44;
+
+function calcLayout() {
+  const w = (typeof window !== "undefined" && window.innerWidth) || 800;
+  if (w < 520) { CELL = 24; MARGIN = 30; }
+  else if (w < 760) { CELL = 30; MARGIN = 36; }
+  else { CELL = 36; MARGIN = 44; }
+}
 
 /* ───────── 全局状态 ───────── */
 let game = null;            // GoGame 实例
@@ -69,6 +78,7 @@ function boardPx() {
 }
 
 function setupCanvas() {
+  calcLayout();
   const px = boardPx(), dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(px * dpr);
   canvas.height = Math.round(px * dpr);
@@ -960,6 +970,14 @@ boardFile.addEventListener("change", (e) => {
 /* ═══════════════════════ 初始化 ═══════════════════════ */
 function init() {
   versionEl.textContent = APP_VERSION;
+  // 窗口尺寸变化时重算棋盘布局（手机横竖屏切换）
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("resize", () => {
+      calcLayout();
+      setupCanvas();
+      render();
+    });
+  }
   // 下拉框（末尾追加"自定义…"占位）
   for (let i = 0; i < BOARD_PRESETS.length; i++) {
     const o = document.createElement("option");
