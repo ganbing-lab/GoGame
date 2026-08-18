@@ -2,6 +2,9 @@
 
 双人对弈围棋，Python + Tkinter 实现。19×19 标准棋盘。
 
+> 另有**网页版**（`docs/` 目录）：纯静态、支持异形棋盘、可联机对战，
+> 直接部署到 GitHub Pages 即可在线玩。详见 [docs/README.md](docs/README.md)。
+
 ## 启动
 
 ```bash
