@@ -321,9 +321,17 @@ function render() {
 }
 
 /* ═══════════════════════ 对局操作 ═══════════════════════ */
+function netConnected() {
+  return netState !== "local" && !!netConn && netConn.open;
+}
+
 function canActNow() {
   if (mode !== "playing" || game.gameOver) return false;
-  if (netState !== "local") return game.current === netMyColor;
+  if (netState !== "local") {
+    // 连接未建立（如房主等待对方加入）→ 可自由落子，连接后一次性全量同步
+    if (!netConnected()) return true;
+    return game.current === netMyColor;
+  }
   return true;
 }
 
@@ -356,7 +364,7 @@ function jumpTo(n) {
 
 function tryPlay(r, c) {
   if (!canActNow()) {
-    if (netState !== "local") flashHint("等待对方落子…");
+    if (netConnected()) flashHint("等待对方落子…");
     return;
   }
   if (navPos < game.moves.length) jumpTo(game.moves.length);
@@ -402,7 +410,7 @@ function doResign() {
 }
 
 function doUndo() {
-  if (netState !== "local") { flashHint("联机对局不支持悔棋"); return; }
+  if (netConnected()) { flashHint("联机对局不支持悔棋"); return; }
   if (mode !== "playing" || game.gameOver) return;
   if (navPos < game.moves.length) jumpTo(game.moves.length);
   if (!game.moves.length) return;
@@ -588,9 +596,15 @@ function onNetConnected() {
   if (netState === "host") {
     netMyColor = COLOR_BLACK;
     netStatus("已连接！对方为白方，你执黑先行。");
+    // 发送完整局面数据包：棋盘 + 全部落子历史 + 计分状态
     netConn.send({
       type: "hello",
       board: { name: boardConfig.name, size: boardConfig.size, disabled: [...boardConfig.disabled] },
+      moves: game.moves.map((m) => ({ r: m.r, c: m.c, color: m.color })),
+      mode: mode,
+      dead: [...deadSet],
+      regionOwner: [...regionOwner.entries()],
+      scoringLocked: scoringLocked,
     });
   } else {
     netMyColor = COLOR_WHITE;
@@ -604,8 +618,22 @@ function handleNetMsg(msg) {
   switch (msg.type) {
     case "hello":
       if (netState === "guest" && msg.board) {
+        // 应用棋盘 + 重放房主的全部落子历史
         applyBoardConfig(msg.board, true);
+        if (Array.isArray(msg.moves) && msg.moves.length) {
+          game.moves = msg.moves.map((m) => ({ r: m.r, c: m.c, color: m.color }));
+          game.replayTo(game.moves.length);
+          navPos = game.moves.length;
+        }
+        // 房主若已在对局后计分阶段，同步计分状态
+        if (msg.mode === "scoring") {
+          mode = "scoring";
+          scoringLocked = !!msg.scoringLocked;
+          deadSet = new Set(msg.dead || []);
+          regionOwner = new Map(msg.regionOwner || []);
+        }
         netStatus("已加入房间！对方执黑，你执白。");
+        render();
         updatePanel();
       }
       break;
@@ -720,8 +748,10 @@ function updatePanel() {
     }
   } else {
     const who = game.current === COLOR_BLACK ? "⚫ 黑方" : "⚪ 白方";
-    if (netState !== "local") {
+    if (netConnected()) {
       turnEl.textContent = who + (game.current === netMyColor ? "（你）" : "（对方）");
+    } else if (netState !== "local") {
+      turnEl.textContent = who + "（等待对方加入…）";
     } else {
       turnEl.textContent = who + " 落子";
     }
@@ -731,12 +761,13 @@ function updatePanel() {
 
   // 对局按钮
   const inPlay = mode === "playing" && !game.gameOver;
-  btnPass.disabled = !inPlay || (netState !== "local" && game.current !== netMyColor);
+  const netLive = netConnected();
+  btnPass.disabled = !inPlay || (netLive && game.current !== netMyColor);
   btnEnd.disabled = !inPlay;
   btnResign.disabled = !inPlay;
-  btnUndo.disabled = !inPlay || netState !== "local";
-  btnPrev.disabled = mode !== "playing" || navPos <= 0 || netState !== "local";
-  btnNext.disabled = mode !== "playing" || navPos >= game.moves.length || netState !== "local";
+  btnUndo.disabled = !inPlay || netLive;
+  btnPrev.disabled = mode !== "playing" || navPos <= 0 || netLive;
+  btnNext.disabled = mode !== "playing" || navPos >= game.moves.length || netLive;
   boardSel.disabled = netState !== "local";
   btnImport.disabled = netState !== "local";
 
