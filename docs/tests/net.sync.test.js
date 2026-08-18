@@ -263,6 +263,15 @@ async function main() {
     G3.game.board[4][3] === 1);
   ok("自愈后双方完全一致", JSON.stringify(H3.game.board) === JSON.stringify(G3.game.board));
 
+  console.log("");
+  console.log("═ 场景 4：网络检测按钮 ═");
+  const bus4 = new NetBus();
+  const h4 = buildSandbox(bus4, "host");
+  const H4 = loadApp(h4);
+  h4.elements["btn-net-check"]._h.click();
+  await flush(8);
+  ok("检测显示信令连接成功", H4.netText.indexOf("信令连接成功") >= 0, "text=" + H4.netText);
+
   console.log("\n" + (failed ? "✗ 存在失败" : "✓ 联机同步测试通过") + "（" + passed + " 通过，失败 " + failed + "）");
   process.exitCode = failed ? 1 : 0;
 }

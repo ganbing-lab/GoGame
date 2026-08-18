@@ -85,6 +85,10 @@ ok("初始化：默认标准 19 路", G().size === 19);
 ok("初始化：状态栏显示黑方", elements["turn"].textContent.indexOf("黑方") >= 0);
 ok("初始化：计分卡片隐藏", elements["scoring-card"].classList.contains("hidden"));
 
+// 网络检测（无 PeerJS 环境）
+elements["btn-net-check"]._h.click();
+ok("无 PeerJS 时检测给出提示", elements["net-status"].textContent.indexOf("PeerJS") >= 0);
+
 // 落子
 clickAt(3, 3);
 ok("黑落子 (3,3)", boardValue(3, 3) === 1 && moveCount() === 1);

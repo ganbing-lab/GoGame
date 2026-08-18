@@ -8,7 +8,7 @@
 "use strict";
 
 /* ───────── 常量 ───────── */
-const APP_VERSION = "v1.2.0";
+const APP_VERSION = "v1.3.0";
 
 // 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
 let CELL = 36;
@@ -67,6 +67,7 @@ const roomInput = document.getElementById("room-input");
 const roomInfo = document.getElementById("room-info");
 const netStatusEl = document.getElementById("net-status");
 const btnLeaveNet = document.getElementById("btn-leave-net");
+const btnNetCheck = document.getElementById("btn-net-check");
 const btnImport = document.getElementById("btn-import");
 const boardFile = document.getElementById("board-file");
 const boardNameEl = document.getElementById("board-name");
@@ -581,6 +582,47 @@ function netStatus(text) {
   netStatusEl.textContent = text;
 }
 
+// ── 网络检测：PeerJS 库 + WebRTC 支持 + 信令服务器连通性 ──
+let netCheckPeer = null;
+function destroyCheckPeer() {
+  if (netCheckPeer) {
+    try { netCheckPeer.destroy(); } catch (e) { /* ignore */ }
+    netCheckPeer = null;
+  }
+}
+
+function checkNetwork() {
+  destroyCheckPeer();
+  if (!peerAvailable()) {
+    netStatus("✗ PeerJS 库未加载（需联网从 CDN 加载）");
+    return;
+  }
+  const w = typeof window !== "undefined" ? window : {};
+  const rtcOK = !!(w.RTCPeerConnection || w.webkitRTCPeerConnection);
+  netStatus("正在检测网络…");
+  const t0 = Date.now();
+  try {
+    netCheckPeer = new Peer();
+  } catch (e) {
+    netStatus("✗ 无法创建连接：" + e.message);
+    return;
+  }
+  netCheckPeer.on("open", () => {
+    const ms = Date.now() - t0;
+    netStatus(
+      "✓ 网络正常：信令连接成功（" + ms + "ms）" +
+      (rtcOK ? " · WebRTC 可用" : " · WebRTC 不可用")
+    );
+    destroyCheckPeer();
+  });
+  netCheckPeer.on("error", (e) => {
+    netStatus("✗ 信令服务器连接失败：" + (e.type || e.message || "未知错误"));
+    destroyCheckPeer();
+  });
+  // 兜底超时
+  setTimeout(destroyCheckPeer, 10000);
+}
+
 function makeRoomCode() {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
 }
@@ -590,6 +632,7 @@ function createRoom() {
     flashHint("无法加载 PeerJS（需联网从 CDN 加载，本地双人不受影响）");
     return;
   }
+  destroyCheckPeer();
   if (netState !== "local") leaveNet();
   const code = makeRoomCode();
   const id = "gogame-" + code;
@@ -629,6 +672,7 @@ function joinRoom(code) {
     flashHint("无法加载 PeerJS（需联网从 CDN 加载，本地双人不受影响）");
     return;
   }
+  destroyCheckPeer();
   if (netState !== "local") leaveNet();
   code = (code || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{4}$/.test(code)) { flashHint("房间号格式：4 位字母数字"); return; }
@@ -877,6 +921,7 @@ roomInput.addEventListener("keydown", (e) => {
   }
 });
 btnLeaveNet.addEventListener("click", leaveNet);
+btnNetCheck.addEventListener("click", checkNetwork);
 
 boardSel.addEventListener("change", () => {
   if (netState !== "local") {
