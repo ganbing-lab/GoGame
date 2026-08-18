@@ -17,23 +17,27 @@ schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS (0x8009030e)
 - 本机 Windows 的 **schannel（默认 TLS 后端）握手失败**，但 TCP/DNS 正常。
 - 已确认 **OpenSSL 后端完全正常**（Node.js 走 OpenSSL 可正常访问 https://github.com）。
 
-## 已做的修复
+## 修复方式（不修改任何配置）
 
-本仓库（E:\GoGame）的 git 配置已切换为 OpenSSL 后端：
+**本仓库已还原为默认配置，未改动任何 git 配置文件。**
+
+需要访问 GitHub 时，在命令前加一次性临时参数即可（只对当次命令生效，不改任何配置）：
 
 ```
-git config http.sslBackend openssl      # 已写入 E:\GoGame\.git\config
+git -c http.sslBackend=openssl ls-remote origin main        # 例：验证连通
+git -c http.sslBackend=openssl push origin main             # 例：推送
 ```
 
 验证（应返回远端 main 的 commit 号，不再报错）：
 
 ```
-git ls-remote origin main
+git -c http.sslBackend=openssl ls-remote origin main
 ```
 
-## 如需全局修复（在其他目录 / 其他仓库也生效）
-
-在**用户自己的终端**（非沙箱）执行：
+> 尊重用户 git 环境：**不要**执行 `git config http.sslBackend openssl`
+> （仓库级）或 `git config --global http.sslBackend openssl`（全局）——
+> 用户自己还要用 git，配置保持原样。用户如需自行全局修复，命令如下
+> （由用户决定，本环境不代改）：
 
 ```
 git config --global http.sslBackend openssl
