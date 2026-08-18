@@ -8,7 +8,7 @@
 "use strict";
 
 /* ───────── 常量 ───────── */
-const APP_VERSION = "v1.4.0";
+const APP_VERSION = "v1.4.1";
 
 // 棋盘布局尺寸（随屏幕宽度自适应，手机端缩小格子）
 let CELL = 36;
@@ -582,10 +582,21 @@ function netStatus(text) {
   netStatusEl.textContent = text;
 }
 
-// ═══ PeerJS 信令服务器配置 ═══
-// 默认使用官方公共云（0.peerjs.com）。若网络访问不稳，可自建 PeerServer 后取消注释填写：
-// const PEER_CONFIG = { host: "你的域名或IP", port: 9000, path: "/" };
-const PEER_CONFIG = {};
+// ═══ PeerJS 信令/中继服务器配置 ═══
+// 默认使用官方公共云（0.peerjs.com）。
+// iceServers 提供 STUN（打洞）+ TURN（中继兜底），使用免费的 OpenRelay TURN，
+// 能显著提高不同局域网/严格 NAT 环境下的连接成功率。
+// 若仍连不上，可自建 PeerServer 后把 host/port/path 填进来（见 docs/README.md）：
+// const PEER_CONFIG = { host: "你的域名或IP", port: 9000, path: "/", config: {...} };
+const PEER_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    ],
+  },
+};
 
 function makePeer(id) {
   return id ? new Peer(id, PEER_CONFIG) : new Peer(PEER_CONFIG);
@@ -730,13 +741,15 @@ function joinRoom(code) {
     conn.on("close", onNetClosed);
     conn.on("error", showNetError);
     netStatus("正在加入房间 " + code + " …");
-    // 连接超时提示：20 秒仍未建立数据通道
+    // 连接超时提示：15 秒仍未建立数据通道
     setTimeout(() => {
       if (netState === "guest" && netConn && !netConn.open) {
-        netStatus("✗ 连接超时：请确认房间号正确、房主页面在线，或网络无法穿透");
-        flashHint("连接超时，可点「网络检测」排查，或重新加入");
+        netStatus(
+          "✗ 连接超时：请确认 ①房间号正确 ②房主页面保持打开 ③双方网络可穿透（严格内网/跨网可点「网络检测」或换同一 WiFi 重试）"
+        );
+        flashHint("连接超时：请核对房主是否在线，或换网络重试");
       }
-    }, 20000);
+    }, 15000);
   });
   peer.on("error", (e) => {
     console.error("peer error:", e);
